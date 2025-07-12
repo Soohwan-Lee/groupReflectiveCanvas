@@ -26,9 +26,8 @@ export default async function handler(req: any, res: any) {
           room_name: roomName,
           user_name: userName,
         },
-        is_owner: true,
         permissions: {
-          transcription: 'write',
+          canAdmin: ['transcription'],
         },
       }),
     })
