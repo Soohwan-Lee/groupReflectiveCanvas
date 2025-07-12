@@ -17,13 +17,13 @@ const peerConfig = {
 
 export default function VoiceChat() {
   const [peerId, setPeerId] = useState<string | null>(null)
-  const [peers, setPeers] = useState<{ [id: string]: MediaConnection }>({})
   const [micOn, setMicOn] = useState(true)
   const [connected, setConnected] = useState(false)
   const localStreamRef = useRef<MediaStream | null>(null)
   const audioRefs = useRef<{ [id: string]: HTMLAudioElement }>({})
   const peerRef = useRef<Peer | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const connectedPeers = useRef<Set<string>>(new Set())
 
   // 1. Get local mic stream
   useEffect(() => {
@@ -45,17 +45,31 @@ export default function VoiceChat() {
         .then((res) => res.json())
         .then((ids: string[]) => {
           ids.forEach((otherId) => {
-            if (otherId !== myId && !peers[otherId]) {
-              const call = peer.call(otherId, localStreamRef.current as MediaStream)
-              call.on('stream', (remoteStream) => {
-                if (!audioRefs.current[otherId]) {
-                  const audio = new window.Audio()
-                  audio.srcObject = remoteStream
-                  audio.autoplay = true
-                  audioRefs.current[otherId] = audio
-                }
-              })
-              setPeers((prev) => ({ ...prev, [otherId]: call }))
+            if (otherId !== myId && !connectedPeers.current.has(otherId)) {
+              try {
+                const call = peer.call(otherId, localStreamRef.current as MediaStream)
+                call.on('stream', (remoteStream) => {
+                  if (!audioRefs.current[otherId]) {
+                    const audio = new window.Audio()
+                    audio.srcObject = remoteStream
+                    audio.autoplay = true
+                    audioRefs.current[otherId] = audio
+                  }
+                })
+                call.on('close', () => {
+                  if (audioRefs.current[otherId]) {
+                    audioRefs.current[otherId].remove()
+                    delete audioRefs.current[otherId]
+                  }
+                  connectedPeers.current.delete(otherId)
+                })
+                call.on('error', () => {
+                  connectedPeers.current.delete(otherId)
+                })
+                connectedPeers.current.add(otherId)
+              } catch (e) {
+                // ignore
+              }
             }
           })
         })
@@ -64,7 +78,6 @@ export default function VoiceChat() {
     peer.on('open', (id) => {
       setPeerId(id)
       connectToRoomPeers(id)
-      // Poll for new peers every few seconds
       pollingRef.current = setInterval(() => {
         if (!destroyed) connectToRoomPeers(id)
       }, POLL_INTERVAL)
@@ -79,13 +92,24 @@ export default function VoiceChat() {
           audioRefs.current[call.peer] = audio
         }
       })
-      setPeers((prev) => ({ ...prev, [call.peer]: call }))
+      call.on('close', () => {
+        if (audioRefs.current[call.peer]) {
+          audioRefs.current[call.peer].remove()
+          delete audioRefs.current[call.peer]
+        }
+        connectedPeers.current.delete(call.peer)
+      })
+      call.on('error', () => {
+        connectedPeers.current.delete(call.peer)
+      })
+      connectedPeers.current.add(call.peer)
     })
     return () => {
       destroyed = true
       peer.destroy()
       Object.values(audioRefs.current).forEach((audio) => audio.remove())
       if (pollingRef.current) clearInterval(pollingRef.current)
+      connectedPeers.current.clear()
     }
   }, [connected])
 
@@ -99,42 +123,35 @@ export default function VoiceChat() {
     })
   }
 
-  // 4. UI: Modern floating button at bottom left
+  // 4. Minimal UI: small round button, bottom left, tooltip on hover
   return (
-    <div style={{ position: 'fixed', left: 24, bottom: 24, zIndex: 20, display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+    <div style={{ position: 'fixed', left: 20, bottom: 20, zIndex: 30 }}>
       <button
         onClick={handleMicToggle}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          background: micOn ? 'rgba(34,197,94,0.9)' : 'rgba(239,68,68,0.9)',
+          width: 48,
+          height: 48,
+          borderRadius: '50%',
+          background: micOn ? 'rgba(34,197,94,0.92)' : 'rgba(239,68,68,0.92)',
           color: '#fff',
           border: 'none',
-          borderRadius: 24,
-          padding: '12px 20px',
-          fontWeight: 600,
-          fontSize: 16,
-          boxShadow: '0 2px 12px #0002',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 2px 8px #0002',
           cursor: 'pointer',
           transition: 'background 0.2s',
-          minWidth: 120,
+          position: 'relative',
         }}
         aria-label={micOn ? 'Turn mic off' : 'Turn mic on'}
+        title={micOn ? 'Mic On' : 'Mic Off'}
       >
         {micOn ? (
-          <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+          <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
         ) : (
-          <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
         )}
-        {micOn ? 'Mic On' : 'Mic Off'}
       </button>
-      <div style={{ marginTop: 8, color: '#222', fontSize: 13, fontWeight: 500, background: 'rgba(255,255,255,0.85)', borderRadius: 8, padding: '6px 14px', boxShadow: '0 1px 4px #0001' }}>
-        {connected ? 'Voice chat ready' : 'Connecting...'}
-      </div>
-      <div style={{ marginTop: 2, color: '#888', fontSize: 12, fontFamily: 'monospace' }}>
-        {peerId ? `ID: ${peerId}` : 'ID: ...'}
-      </div>
     </div>
   )
 } 
