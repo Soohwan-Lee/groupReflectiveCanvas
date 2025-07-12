@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Readable } from 'stream';
 import Busboy from 'busboy';
-import FormData, { Blob } from 'formdata-node';
-import fetch from 'node-fetch';
+import { FormData, Blob } from 'formdata-node';
+// node-fetch import 제거, Node 18+ 내장 fetch 사용
 
 const logs: Array<{ timestamp: string; userId: string; text: string }> = [];
 
@@ -56,6 +56,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     formData.append('response_format', 'json');
     formData.append('language', 'ko');
 
+    // Node 18+ 내장 fetch 사용
     const openaiRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
@@ -79,6 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ text, timestamp, userId });
   } catch (e: any) {
-    return res.status(500).json({ error: e.message });
+    console.error('Transcribe API error:', e);
+    return res.status(500).json({ error: e.message || String(e) });
   }
 } 
