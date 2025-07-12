@@ -30,6 +30,12 @@ export default function VoiceChat() {
   }[]>([])
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
+  // 참가자별 트랜스크립션 전체 로그 (메모리상)
+  const transcriptLog = useRef<{
+    user: string
+    text: string
+    timestamp: number
+  }[]>([])
 
   // 1. Join/leave logic (user gesture required)
   const handleJoin = async () => {
@@ -93,6 +99,16 @@ export default function VoiceChat() {
             isFinal: msg.is_final,
           },
         ])
+        // 콘솔에 실시간 출력
+        const user = msg.user_name || msg.session_id
+        const time = new Date().toLocaleTimeString()
+        console.log(`[Transcript][${time}] ${user}: ${msg.text}`)
+        // 메모리상 로그에도 저장
+        transcriptLog.current.push({
+          user,
+          text: msg.text,
+          timestamp: Date.now(),
+        })
       })
       await call.join({ url: ROOM_URL })
       call.setLocalAudio(micOn)
