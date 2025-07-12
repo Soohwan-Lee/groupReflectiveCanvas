@@ -52,7 +52,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const formData = new FormData();
     formData.append('file', new Blob([audioBuffer]), 'audio.wav');
-    formData.append('model', 'gpt-4o-mini-transcribe');
+    formData.append('model', 'whisper-1');
     formData.append('response_format', 'json');
     formData.append('language', 'ko');
 
