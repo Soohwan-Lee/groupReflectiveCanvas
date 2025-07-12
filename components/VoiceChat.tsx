@@ -125,10 +125,21 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }, [callRef.current])
 
+  const ROOM_NAME = 'upOFJOWxqCOhRYldrIsR'
+
   // 수정: joined 후 startTranscription()
   const joinCall = async () => {
     setJoining(true)
     try {
+      // 1) 서버에서 meeting token 발급 (owner 권한 포함 → transcription 가능)
+      const tokenRes = await fetch('/api/daily-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ roomName: ROOM_NAME, userName }),
+      })
+      const tokenJson = await tokenRes.json()
+      const meetingToken = tokenJson.token as string | undefined
+
       if (!callRef.current) {
         callRef.current = DailyIframe.createCallObject();
       }
@@ -154,6 +165,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       });
       await callRef.current.join({
         url: DAILY_URL,
+        token: meetingToken,
         userName,
         audioSource: true,
         videoSource: false,
