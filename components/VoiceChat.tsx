@@ -6,6 +6,7 @@
 
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
+import { MicVAD } from '@ricky0123/vad'
 
 const ROOM_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR'
 
@@ -16,7 +17,12 @@ interface TranscriptionMessage {
   user_name?: string
 }
 
-export default function VoiceChat() {
+// 1. VoiceChat 컴포넌트가 userName: string prop을 받도록 수정
+interface VoiceChatProps {
+  userName: string;
+}
+
+export default function VoiceChat({ userName }: VoiceChatProps) {
   const [micOn, setMicOn] = useState(true)
   const callRef = useRef<DailyCall | null>(null)
   const [joined, setJoined] = useState(false)
@@ -35,6 +41,65 @@ export default function VoiceChat() {
   const micStreamRef = useRef<MediaStream | null>(null)
   const whisperUserId = useRef(`user-${Math.random().toString(36).slice(2, 8)}`)
   const [dailySessionId, setDailySessionId] = useState<string | null>(null);
+  const vadRef = useRef<any>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioBufferQueue = useRef<Float32Array[]>([]);
+  const vadActiveRef = useRef(false);
+
+  // 음성 구간이 감지될 때마다 오디오 버퍼를 모아서 Whisper로 전송
+  const sendAudioBufferToWhisper = async (buffer: Float32Array) => {
+    function encodeWAV(buffer: Float32Array, sampleRate: number) {
+      const length = buffer.length;
+      const wavBuffer = new ArrayBuffer(44 + length * 2);
+      const view = new DataView(wavBuffer);
+      view.setUint32(0, 0x52494646, false);
+      view.setUint32(4, 36 + length * 2, true);
+      view.setUint32(8, 0x57415645, false);
+      view.setUint32(12, 0x666d7420, false);
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      view.setUint32(36, 0x64617461, false);
+      view.setUint32(40, length * 2, true);
+      let offset = 44;
+      for (let i = 0; i < buffer.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, buffer[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      return new Blob([wavBuffer], { type: 'audio/wav' });
+    }
+    const sampleRate = audioContextRef.current?.sampleRate || 16000;
+    const audioBlob = encodeWAV(buffer, sampleRate);
+    if (audioBlob.size < 1000) return;
+    if (!dailySessionId) return;
+    const form = new FormData();
+    form.append('file', audioBlob, 'audio.wav');
+    form.append('userId', dailySessionId);
+    form.append('userName', userName);
+    form.append('timestamp', new Date().toISOString());
+    try {
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: form,
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.text) {
+          console.log(`[Whisper][${data.timestamp}] ${data.userId}(${data.userName}): ${data.text}`);
+        }
+      } else {
+        const errText = await res.text();
+        console.error('Transcribe error', errText);
+      }
+    } catch (err) {
+      console.error('Transcribe error', err);
+    }
+  };
 
   // Join/leave logic
   const handleJoin = async () => {
@@ -92,60 +157,18 @@ export default function VoiceChat() {
       })
       await call.join({ url: ROOM_URL })
       call.setLocalAudio(micOn)
-      // 3. Whisper용 MediaRecorder 시작 (2초마다 청크)
-      console.log('[VoiceChat] Setting up MediaRecorder for Whisper transcription...')
-      // Fallback: 브라우저가 지원하는 포맷을 자동 선택
-      let mimeType = '';
-      let fileExt = 'webm';
-      if (window.MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        mimeType = 'audio/webm;codecs=opus';
-        fileExt = 'webm';
-      } else if (window.MediaRecorder.isTypeSupported('audio/webm')) {
-        mimeType = 'audio/webm';
-        fileExt = 'webm';
-      } else if (window.MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
-        mimeType = 'audio/ogg;codecs=opus';
-        fileExt = 'ogg';
-      } else {
-        alert('이 브라우저는 실시간 음성 전사를 지원하지 않습니다.');
-        return;
-      }
-      const recorder = new window.MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder
-      recorder.ondataavailable = async (e) => {
-        // 1. 빈 청크 무시
-        if (!e.data || e.data.size === 0) return;
-        // 2. 타입 체크 (webm/ogg만 허용)
-        if (!(e.data.type.startsWith('audio/webm') || e.data.type.startsWith('audio/ogg'))) return;
-        // 3. (향후) VAD 적용 시, 무음 구간은 전송하지 않도록 추가 가능
-        if (dailySessionId) {
-          const form = new FormData();
-          form.append('file', e.data, `audio.${fileExt}`);
-          form.append('userId', dailySessionId);
-          form.append('timestamp', new Date().toISOString());
-          try {
-            const res = await fetch('/api/transcribe', {
-              method: 'POST',
-              body: form,
-            });
-            const contentType = res.headers.get('content-type') || '';
-            if (res.ok && contentType.includes('application/json')) {
-              const data = await res.json();
-              if (data.text) {
-                // 콘솔에 실시간 출력
-                console.log(`[Whisper][${data.timestamp}] ${data.userId}: ${data.text}`);
-              }
-            } else {
-              const errText = await res.text();
-              console.error('Transcribe error', errText);
-            }
-          } catch (err) {
-            console.error('Transcribe error', err);
+      // VAD + Web Audio API (MicVAD)
+      vadRef.current = await MicVAD.new({
+        onSpeechStart: () => {
+          vadActiveRef.current = true;
+        },
+        onSpeechEnd: async (audio: Float32Array) => {
+          vadActiveRef.current = false;
+          if (audio.length > 0) {
+            await sendAudioBufferToWhisper(audio);
           }
-        }
-      }
-      recorder.start(2000) // 2초마다 청크 (짧은 청크는 Whisper가 인식 못할 수 있음)
-      console.log('[VoiceChat] MediaRecorder started, recording every 2 seconds')
+        },
+      });
     } catch (err: any) {
       console.error('[VoiceChat] Failed to join audio room:', err)
       setErrorMsg('Failed to join audio room')

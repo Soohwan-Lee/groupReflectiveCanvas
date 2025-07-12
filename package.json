@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@daily-co/daily-js": "^0.80.0",
+    "@ricky0123/vad": "^0.2.4",
     "@supabase/supabase-js": "^2.50.5",
     "@tldraw/sync": "^3.14.2",
     "formdata-node": "^6.0.3",

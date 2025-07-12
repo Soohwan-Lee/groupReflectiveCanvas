@@ -31,6 +31,7 @@ export default async function handler(req: any, res: any) {
     return res.status(400).json({ error: 'Content-Type must be multipart/form-data' });
 
   let userId = '';
+  let userName = '';
   let timestamp = '';
   let audioBuffer: Buffer | null = null;
 
@@ -43,6 +44,7 @@ export default async function handler(req: any, res: any) {
     });
     bb.on('field', (name: string, val: string) => {
       if (name === 'userId')     userId = val;
+      if (name === 'userName')   userName = val;
       if (name === 'timestamp')  timestamp = val;
     });
     bb.on('error', reject).on('finish', resolve);
@@ -97,6 +99,7 @@ export default async function handler(req: any, res: any) {
         {
           session_id: userId,      // 임시: userId를 session_id로 사용
           participant_id: userId,  // 임시: userId를 participant_id로 사용
+          user_name: userName,     // 추가: userName 저장
           start_time,
           end_time,
           text,
