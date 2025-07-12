@@ -1,129 +1,72 @@
+// Vite env type for TypeScript
+/// <reference types="vite/client" />
 import React, { useEffect, useRef, useState } from 'react'
-import Peer, { MediaConnection } from 'peerjs'
+import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
-const ROOM_ID = 'demo-room'
-const POLL_INTERVAL = 5000 // ms
-
-const peerConfig = {
-  config: {
-    iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' },
-      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-      { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-    ]
-  }
-}
+const DAILY_API_KEY = import.meta.env.VITE_DAILY_API_KEY
+const ROOM_URL = `https://api.daily.co/v1/rooms`
 
 export default function VoiceChat() {
-  const [peerId, setPeerId] = useState<string | null>(null)
   const [micOn, setMicOn] = useState(true)
-  const [connected, setConnected] = useState(false)
-  const localStreamRef = useRef<MediaStream | null>(null)
-  const audioRefs = useRef<{ [id: string]: HTMLAudioElement }>({})
-  const peerRef = useRef<Peer | null>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const connectedPeers = useRef<Set<string>>(new Set())
+  const callRef = useRef<DailyCall | null>(null)
+  const [joined, setJoined] = useState(false)
 
-  // 1. Get local mic stream
+  // 1. Create or join a Daily room on mount
   useEffect(() => {
-    navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
-      localStreamRef.current = stream
-      setConnected(true)
-    })
+    let isMounted = true
+    async function setupRoomAndJoin() {
+      if (!DAILY_API_KEY) {
+        alert('Daily.co API key is missing! Please set VITE_DAILY_API_KEY in your environment.')
+        return
+      }
+      // 1. Create a new room (for demo, ephemeral)
+      let roomUrl = ''
+      try {
+        const res = await fetch(ROOM_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${DAILY_API_KEY}`,
+          },
+          body: JSON.stringify({ properties: { enable_chat: false, enable_screenshare: false, exp: Math.floor(Date.now() / 1000) + 60 * 60 } }),
+        })
+        const data = await res.json()
+        roomUrl = data.url
+      } catch (e) {
+        // fallback: use a fixed room (for demo)
+        roomUrl = 'https://groupreflectivecanvas.daily.co/demo-room'
+      }
+      if (!isMounted) return
+      // 2. Join the room (audio only)
+      const call = DailyIframe.createCallObject({ userName: 'User', audioSource: true, videoSource: false })
+      callRef.current = call
+      call.on('joined-meeting', () => setJoined(true))
+      call.on('left-meeting', () => setJoined(false))
+      await call.join({ url: roomUrl })
+      // Mute/unmute mic based on state
+      call.setLocalAudio(micOn)
+    }
+    setupRoomAndJoin()
+    return () => {
+      isMounted = false
+      if (callRef.current) {
+        callRef.current.leave()
+        callRef.current.destroy()
+      }
+    }
   }, [])
 
-  // 2. Setup PeerJS with TURN/STUN and connect to all peers in the room
-  useEffect(() => {
-    if (!localStreamRef.current) return
-    const peer = new Peer('', peerConfig)
-    peerRef.current = peer
-    let destroyed = false
-
-    function connectToRoomPeers(myId: string) {
-      fetch(`https://0.peerjs.com/peers/${ROOM_ID}`)
-        .then((res) => res.json())
-        .then((ids: string[]) => {
-          ids.forEach((otherId) => {
-            if (otherId !== myId && !connectedPeers.current.has(otherId)) {
-              try {
-                const call = peer.call(otherId, localStreamRef.current as MediaStream)
-                call.on('stream', (remoteStream) => {
-                  if (!audioRefs.current[otherId]) {
-                    const audio = new window.Audio()
-                    audio.srcObject = remoteStream
-                    audio.autoplay = true
-                    audioRefs.current[otherId] = audio
-                  }
-                })
-                call.on('close', () => {
-                  if (audioRefs.current[otherId]) {
-                    audioRefs.current[otherId].remove()
-                    delete audioRefs.current[otherId]
-                  }
-                  connectedPeers.current.delete(otherId)
-                })
-                call.on('error', () => {
-                  connectedPeers.current.delete(otherId)
-                })
-                connectedPeers.current.add(otherId)
-              } catch (e) {
-                // ignore
-              }
-            }
-          })
-        })
-    }
-
-    peer.on('open', (id) => {
-      setPeerId(id)
-      connectToRoomPeers(id)
-      pollingRef.current = setInterval(() => {
-        if (!destroyed) connectToRoomPeers(id)
-      }, POLL_INTERVAL)
-    })
-    peer.on('call', (call) => {
-      call.answer(localStreamRef.current as MediaStream)
-      call.on('stream', (remoteStream) => {
-        if (!audioRefs.current[call.peer]) {
-          const audio = new window.Audio()
-          audio.srcObject = remoteStream
-          audio.autoplay = true
-          audioRefs.current[call.peer] = audio
-        }
-      })
-      call.on('close', () => {
-        if (audioRefs.current[call.peer]) {
-          audioRefs.current[call.peer].remove()
-          delete audioRefs.current[call.peer]
-        }
-        connectedPeers.current.delete(call.peer)
-      })
-      call.on('error', () => {
-        connectedPeers.current.delete(call.peer)
-      })
-      connectedPeers.current.add(call.peer)
-    })
-    return () => {
-      destroyed = true
-      peer.destroy()
-      Object.values(audioRefs.current).forEach((audio) => audio.remove())
-      if (pollingRef.current) clearInterval(pollingRef.current)
-      connectedPeers.current.clear()
-    }
-  }, [connected])
-
-  // 3. Mic toggle
+  // 2. Mic toggle
   const handleMicToggle = () => {
     setMicOn((on) => {
-      if (localStreamRef.current) {
-        localStreamRef.current.getAudioTracks().forEach((track) => (track.enabled = !on))
+      if (callRef.current) {
+        callRef.current.setLocalAudio(!on)
       }
       return !on
     })
   }
 
-  // 4. Minimal UI: small round button, bottom left, tooltip on hover
+  // 3. Minimal UI: small round button, bottom left, tooltip on hover
   return (
     <div style={{ position: 'fixed', left: 20, bottom: 20, zIndex: 30 }}>
       <button
@@ -145,6 +88,7 @@ export default function VoiceChat() {
         }}
         aria-label={micOn ? 'Turn mic off' : 'Turn mic on'}
         title={micOn ? 'Mic On' : 'Mic Off'}
+        disabled={!joined}
       >
         {micOn ? (
           <svg width="28" height="28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
