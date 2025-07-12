@@ -13,7 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 const logs: Array<{ timestamp: string; userId: string; text: string }> = [];
 
 export const config = {
-  runtime: 'nodejs20.x',
+  runtime: 'nodejs',
   maxDuration: 30,
 };
 
