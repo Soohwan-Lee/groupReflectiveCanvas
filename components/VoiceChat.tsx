@@ -4,8 +4,8 @@
 // auto_start_transcription(C 방식) 적용: join만 하면 자동으로 트랜스크립션이 시작됨
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
-import React, { useRef, useState } from 'react'
-// import * as VAD from '@ricky0123/vad'  // (정적 import 제거)
+import React, { useRef, useState, useEffect } from 'react'
+// import * as VAD from '@ricky0123/vad'  // VAD 완전 제거
 
 interface VoiceChatProps {
   userName: string;
@@ -17,40 +17,27 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [micOn, setMicOn] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [transcripts, setTranscripts] = useState<any[]>([])
-  const vadRef = useRef<any>(null)
-  const audioContextRef = useRef<AudioContext | null>(null)
+  const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null) // Daily 연동용
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
 
-  // 음성 구간이 감지될 때마다 Whisper로 전송
-  const sendAudioBufferToWhisper = async (buffer: Float32Array) => {
-    function encodeWAV(buffer: Float32Array, sampleRate: number) {
-      const length = buffer.length;
-      const wavBuffer = new ArrayBuffer(44 + length * 2);
-      const view = new DataView(wavBuffer);
-      view.setUint32(0, 0x52494646, false);
-      view.setUint32(4, 36 + length * 2, true);
-      view.setUint32(8, 0x57415645, false);
-      view.setUint32(12, 0x666d7420, false);
-      view.setUint32(16, 16, true);
-      view.setUint16(20, 1, true);
-      view.setUint16(22, 1, true);
-      view.setUint32(24, sampleRate, true);
-      view.setUint32(28, sampleRate * 2, true);
-      view.setUint16(32, 2, true);
-      view.setUint16(34, 16, true);
-      view.setUint32(36, 0x64617461, false);
-      view.setUint32(40, length * 2, true);
-      let offset = 44;
-      for (let i = 0; i < buffer.length; i++, offset += 2) {
-        let s = Math.max(-1, Math.min(1, buffer[i]));
-        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
-      }
-      return new Blob([wavBuffer], { type: 'audio/wav' });
-    }
-    const sampleRate = audioContextRef.current?.sampleRate || 16000;
-    const audioBlob = encodeWAV(buffer, sampleRate);
-    if (audioBlob.size < 1000) return;
+  // Daily active-speaker-change 이벤트로 speakerId 추적 (실제 연동 시 아래 코드 사용)
+  // useEffect(() => {
+  //   call.on('active-speaker-change', p => setCurrentSpeakerId(p.session_id));
+  // }, []);
+
+  // 임시: userName을 speakerId로 사용
+  useEffect(() => {
+    setCurrentSpeakerId(userName)
+  }, [userName])
+
+  // 오디오 chunk를 Whisper로 전송
+  const sendAudioChunkToWhisper = async (audioBlob: Blob) => {
+    if (!audioBlob || audioBlob.size < 1000) return;
     const form = new FormData();
-    form.append('file', audioBlob, 'audio.wav');
+    form.append('file', audioBlob, 'audio.webm');
+    form.append('speaker_id', currentSpeakerId || 'unknown');
     form.append('userName', userName);
     form.append('timestamp', new Date().toISOString());
     try {
@@ -73,22 +60,24 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }
 
-  const startVAD = async () => {
+  const startRecording = async () => {
     setJoining(true)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const audioContext = new AudioContext({ sampleRate: 16000 })
-      audioContextRef.current = audioContext
-      // dynamic import로 변경
-      const VAD = await import('@ricky0123/vad')
-      vadRef.current = await VAD.MicVAD.new({
-        onSpeechStart: () => {},
-        onSpeechEnd: async (audio: Float32Array) => {
-          if (audio.length > 0 && micOn) {
-            await sendAudioBufferToWhisper(audio)
-          }
-        },
-      })
+      streamRef.current = stream
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
+      const mediaRecorder = new MediaRecorder(stream, { mimeType })
+      mediaRecorderRef.current = mediaRecorder
+      audioChunksRef.current = []
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0 && micOn) {
+          sendAudioChunkToWhisper(e.data)
+        }
+      }
+      mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop())
+      }
+      mediaRecorder.start(15000) // 15초마다 chunk
       setJoined(true)
       setJoining(false)
     } catch (err) {
@@ -97,9 +86,15 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }
 
-  const stopVAD = () => {
-    if (vadRef.current) vadRef.current.pause()
-    if (audioContextRef.current) audioContextRef.current.close()
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop())
+      streamRef.current = null
+    }
     setJoined(false)
     setJoining(false)
   }
@@ -112,7 +107,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
       {!joined ? (
         <button
-          onClick={startVAD}
+          onClick={startRecording}
           style={{
             minWidth: 100,
             height: 40,
@@ -135,7 +130,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       ) : (
         <>
           <button
-            onClick={stopVAD}
+            onClick={stopRecording}
             style={{
               minWidth: 40,
               height: 40,
