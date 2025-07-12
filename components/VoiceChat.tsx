@@ -16,11 +16,10 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [joining, setJoining] = useState(false)
   const [micOn, setMicOn] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  const [transcripts, setTranscripts] = useState<any[]>([])
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null)
   const callRef = useRef<DailyCall | null>(null)
 
-  // Daily call 객체 생성 및 관리
+  // Daily 룸 URL (퍼블릭 룸, 토큰 불필요)
   const DAILY_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR';
 
   useEffect(() => {
@@ -79,39 +78,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     });
   };
 
-  // (Whisper chunk 전송용 MediaRecorder 코드는 별도 hook/함수로 분리, 아래는 주석 처리)
-  // 오디오 chunk를 Whisper로 전송
-  const sendAudioChunkToWhisper = async (audioBlob: Blob) => {
-    if (!audioBlob || audioBlob.size < 1000) return;
-    const form = new FormData();
-    form.append('file', audioBlob, 'audio.webm');
-    form.append('userName', userName);
-    form.append('sessionId', currentSpeakerId || 'unknown');
-    // 아래 3개는 실제 Whisper 결과로 채워야 하지만, 우선 임시값으로라도 채움
-    form.append('start_time', new Date().toISOString());
-    form.append('end_time', new Date(Date.now() + 1000).toISOString());
-    form.append('text', '[transcript placeholder]');
-    try {
-      const res = await fetch('/api/transcribe', {
-        method: 'POST',
-        body: form,
-      });
-      const contentType = res.headers.get('content-type') || '';
-      if (res.ok && contentType.includes('application/json')) {
-        const data = await res.json();
-        if (data.text) {
-          setTranscripts((prev) => [...prev, { ...data, userName }])
-        }
-      } else {
-        const errText = await res.text();
-        setErrorMsg('Transcribe error: ' + errText)
-      }
-    } catch (err) {
-      setErrorMsg('Transcribe error')
-    }
-  }
-
-  // 오디오 트랙 상태는 participant-updated 이벤트에서 확인 가능
+  // 오디오 트랙 상태는 participant-updated 이벤트에서 확인 가능 (필요시 확장)
   useEffect(() => {
     if (!callRef.current) return;
     const handler = (ev: any) => {
@@ -199,13 +166,6 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
           </button>
         </>
       )}
-      <div style={{ marginLeft: 16 }}>
-        {transcripts.slice(-3).map((t, i) => (
-          <div key={i} style={{ fontSize: 14, color: '#222' }}>
-            <b>{t.userName}:</b> {t.text}
-          </div>
-        ))}
-      </div>
       {errorMsg && <div style={{ color: 'red' }}>{errorMsg}</div>}
     </div>
   )
