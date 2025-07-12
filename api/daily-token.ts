@@ -24,7 +24,10 @@ export default async function handler(req: any, res: any) {
         properties: {
           room_name: roomName,
           user_name: userName,
-          is_owner: true, // owner has all permissions incl. transcription
+        },
+        is_owner: true,
+        permissions: {
+          transcription: 'write',
         },
       }),
     })
