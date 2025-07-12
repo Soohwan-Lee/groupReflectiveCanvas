@@ -1,0 +1,40 @@
+{
+  "name": "groupreflectivecanvas",
+  "version": "1.0.0",
+  "description": "Group Reflective Canvas",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Soohwan-Lee/groupReflectiveCanvas.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Soohwan-Lee/groupReflectiveCanvas/issues"
+  },
+  "homepage": "https://github.com/Soohwan-Lee/groupReflectiveCanvas#readme",
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.4"
+  },
+  "dependencies": {
+    "@tldraw/sync": "^3.14.2",
+    "peerjs": "^1.5.5",
+    "react-peerjs": "^0.0.0",
+    "tldraw": "^3.14.2"
+  }
+}
