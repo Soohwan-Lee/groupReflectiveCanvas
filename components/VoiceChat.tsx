@@ -7,7 +7,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
-// 실시간 전사만 수행, 음성 녹음/저장/파일화는 하지 않음
+// 실시간 전사, 녹음, 저장 등은 하지 않음. 오직 Daily 음성채팅만 동작
 const ROOM_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR'
 
 interface TranscriptionMessage {
@@ -15,12 +15,6 @@ interface TranscriptionMessage {
   is_final: boolean
   session_id: string
   user_name?: string
-}
-
-interface WhisperLog {
-  timestamp: string
-  userId: string
-  text: string
 }
 
 export default function VoiceChat() {
@@ -36,17 +30,7 @@ export default function VoiceChat() {
     text: string
     user: string
     isFinal: boolean
-    source: 'daily' | 'whisper'
   }[]>([])
-  const transcriptLog = useRef<{
-    user: string
-    text: string
-    timestamp: number
-    source: 'daily' | 'whisper'
-  }[]>([])
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const micStreamRef = useRef<MediaStream | null>(null)
-  const whisperUserId = useRef(`user-${Math.random().toString(36).slice(2, 8)}`)
 
   // Join/leave logic
   const handleJoin = async () => {
@@ -54,11 +38,11 @@ export default function VoiceChat() {
     try {
       // 1. 마이크 스트림 획득 (한 번만)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      micStreamRef.current = stream
-      // 2. Daily에 스트림 전달
+      const audioTrack = stream.getAudioTracks()[0]
+      // 2. Daily에 오디오 트랙만 전달
       const call = DailyIframe.createCallObject({
         userName: 'User',
-        audioSource: stream as any, // Type workaround: Daily types may expect boolean|string|MediaStreamTrack, but MediaStream works in practice
+        audioSource: audioTrack, // MediaStreamTrack만 전달
         videoSource: false,
       })
       callRef.current = call
@@ -76,68 +60,22 @@ export default function VoiceChat() {
         setErrorMsg('Audio connection error')
         setAudioWorking(false)
       })
-      // Daily transcription-message (참고용, Whisper와 병행)
+      // Daily transcription-message (자막 UI용, 필요시)
       call.on('transcription-message', (ev: any) => {
         const msg = ev.data as TranscriptionMessage
         if (!msg || !msg.text) return
         setTranscripts((prev) => [
           ...prev,
           {
-            id: `daily-${msg.session_id}-${Date.now()}`,
+            id: `${msg.session_id}-${Date.now()}`,
             text: msg.text,
             user: msg.user_name || msg.session_id,
             isFinal: msg.is_final,
-            source: 'daily',
           },
         ])
-        transcriptLog.current.push({
-          user: msg.user_name || msg.session_id,
-          text: msg.text,
-          timestamp: Date.now(),
-          source: 'daily',
-        })
       })
       await call.join({ url: ROOM_URL })
       call.setLocalAudio(micOn)
-      // 3. Whisper용 MediaRecorder 시작
-      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm' })
-      mediaRecorderRef.current = recorder
-      recorder.ondataavailable = async (e) => {
-        if (e.data && e.data.size > 0) {
-          const form = new FormData()
-          form.append('file', e.data, 'audio.webm')
-          form.append('userId', whisperUserId.current)
-          form.append('timestamp', new Date().toISOString())
-          try {
-            const res = await fetch('/api/transcribe', {
-              method: 'POST',
-              body: form,
-            })
-            const data = await res.json()
-            if (data.text) {
-              setTranscripts((prev) => [
-                ...prev,
-                {
-                  id: `whisper-${data.timestamp}`,
-                  text: data.text,
-                  user: data.userId,
-                  isFinal: true,
-                  source: 'whisper',
-                },
-              ])
-              transcriptLog.current.push({
-                user: data.userId,
-                text: data.text,
-                timestamp: Date.now(),
-                source: 'whisper',
-              })
-            }
-          } catch (err) {
-            // ignore
-          }
-        }
-      }
-      recorder.start(3000) // 3초마다 청크
     } catch (err: any) {
       setErrorMsg('Failed to join audio room')
       setAudioWorking(false)
@@ -150,14 +88,6 @@ export default function VoiceChat() {
       callRef.current.leave()
       callRef.current.destroy()
       callRef.current = null
-    }
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop()
-      mediaRecorderRef.current = null
-    }
-    if (micStreamRef.current) {
-      micStreamRef.current.getTracks().forEach((t) => t.stop())
-      micStreamRef.current = null
     }
     setJoined(false)
     setAudioWorking(true)
@@ -223,7 +153,7 @@ export default function VoiceChat() {
     audioElements.current = {}
   }
 
-  // 가장 최근 transcript (whisper > daily 우선)
+  // 가장 최근 transcript (Daily 자막)
   const transcriptToShow = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null
 
   return (
@@ -302,8 +232,8 @@ export default function VoiceChat() {
           </>
         )}
       </div>
-      {/* 트랜스크립션 자막 UI */}
-      {joined && (
+      {/* 트랜스크립션 자막 UI (Daily 자막만, 필요시) */}
+      {joined && transcriptToShow && (
         <div
           style={{
             position: 'fixed',
@@ -322,19 +252,12 @@ export default function VoiceChat() {
             boxShadow: '0 2px 12px #0003',
             zIndex: 40,
             pointerEvents: 'none',
-            opacity: transcriptToShow ? 1 : 0,
+            opacity: 1,
             transition: 'opacity 0.2s',
           }}
         >
-          {transcriptToShow ? (
-            <>
-              <span style={{ color: transcriptToShow.source === 'whisper' ? '#38bdf8' : '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
-              <span>{transcriptToShow.text}</span>
-              {transcriptToShow.source === 'whisper' && <span style={{ fontSize: 12, color: '#38bdf8', marginLeft: 8 }}>(AI)</span>}
-            </>
-          ) : (
-            <span style={{ color: '#94a3b8' }}>Listening...</span>
-          )}
+          <span style={{ color: '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
+          <span>{transcriptToShow.text}</span>
         </div>
       )}
     </>
