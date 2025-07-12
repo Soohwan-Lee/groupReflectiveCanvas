@@ -15,7 +15,7 @@ const supabase = createClient(
 
 export const config = {
   api: {
-    bodyParser: false, // 반드시 꺼야 함 (busboy 사용)
+    bodyParser: false,
   },
 };
 
@@ -23,14 +23,18 @@ export default async function handler(req: any, res: any) {
   if (req.method !== 'POST')
     return res.status(405).json({ error: 'Method not allowed' });
 
-  const busboy = new Busboy({ headers: req.headers });
-  const fields: any = {};
+  try {
+    const fields: any = await new Promise((resolve, reject) => {
+      const busboy = new Busboy({ headers: req.headers });
+      const result: any = {};
+      busboy.on('field', (fieldname, val) => {
+        result[fieldname] = val;
+      });
+      busboy.on('finish', () => resolve(result));
+      busboy.on('error', reject);
+      req.pipe(busboy);
+    });
 
-  busboy.on('field', (fieldname, val) => {
-    fields[fieldname] = val;
-  });
-
-  busboy.on('finish', async () => {
     const { userName, sessionId, start_time, end_time, text } = fields;
     if (!userName || !sessionId || !start_time || !end_time || !text)
       return res.status(400).json({ error: 'Missing required fields' });
@@ -48,7 +52,7 @@ export default async function handler(req: any, res: any) {
       return res.status(500).json({ error: 'Supabase insert error', detail: error });
     }
     return res.status(200).json({ ok: true });
-  });
-
-  req.pipe(busboy);
+  } catch (err) {
+    return res.status(500).json({ error: 'Server error', detail: String(err) });
+  }
 } 
