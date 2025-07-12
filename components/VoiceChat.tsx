@@ -19,6 +19,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null)
   const callRef = useRef<DailyCall | null>(null)
   const remoteAudios = useRef<Record<string, HTMLAudioElement>>({})
+  const [transcripts, setTranscripts] = useState<{ user: string; text: string }[]>([])
 
   // Daily 룸 URL (퍼블릭 룸, 토큰 불필요)
   const DAILY_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR';
@@ -87,16 +88,59 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }, [callRef.current])
 
+  // transcription-message handler 등록
+  useEffect(() => {
+    if (!callRef.current) return
+
+    const handleTransMsg = async (msg: any) => {
+      // Daily docs: msg contains fields: text, silent, speaker, timestamp, words
+      if (!msg?.text) return
+      const participantId = msg.speaker
+      const participant = callRef.current?.participants()[participantId]
+      const userNameFromDaily = participant?.user_name || 'Unknown'
+      const sessionIdStr = DAILY_URL
+      const payload = {
+        session_id: sessionIdStr,
+        participant_id: participantId,
+        user_name: userNameFromDaily,
+        start_time: new Date().toISOString(),
+        text: msg.text,
+      }
+      // Optimistic UI 업데이트
+      setTranscripts((prev) => [...prev.slice(-19), { user: userNameFromDaily, text: msg.text }])
+      try {
+        await fetch('/api/save-transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      } catch (e) {
+        console.error('save-transcript error', e)
+      }
+    }
+
+    callRef.current.on('transcription-message', handleTransMsg)
+    return () => {
+      callRef.current?.off('transcription-message', handleTransMsg)
+    }
+  }, [callRef.current])
+
+  // 수정: joined 후 startTranscription()
   const joinCall = async () => {
     setJoining(true)
     try {
       if (!callRef.current) {
         callRef.current = DailyIframe.createCallObject();
       }
-      callRef.current.on('joined-meeting', () => {
+      callRef.current.on('joined-meeting', async () => {
         setJoined(true);
         setJoining(false);
         setErrorMsg(null);
+        try {
+          await callRef.current?.startTranscription()
+        } catch (e) {
+          console.warn('startTranscription error', e)
+        }
       });
       callRef.current.on('left-meeting', () => {
         setJoined(false);
@@ -224,6 +268,11 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         </>
       )}
       {errorMsg && <div style={{ color: 'red' }}>{errorMsg}</div>}
+      {transcripts.slice(-3).map((t, i) => (
+        <div key={i} style={{ fontSize: 14, color: '#222' }}>
+          <b>{t.user}:</b> {t.text}
+        </div>
+      ))}
     </div>
   )
 } 
