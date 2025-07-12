@@ -24,7 +24,6 @@
   },
   "homepage": "https://github.com/Soohwan-Lee/groupReflectiveCanvas#readme",
   "devDependencies": {
-    "@ricky0123/vad": "^0.2.4",
     "@types/busboy": "^1.5.4",
     "@types/node": "^24.0.13",
     "@types/react": "^19.1.8",
