@@ -7,7 +7,8 @@
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
-const ROOM_URL = 'https://soohwan.daily.co/xL84zG8xEXXiCrrARCR6'
+// 실시간 전사만 수행, 음성 녹음/저장/파일화는 하지 않음
+const ROOM_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR'
 
 interface TranscriptionMessage {
   text: string
