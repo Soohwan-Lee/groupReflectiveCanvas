@@ -94,17 +94,33 @@ export default function VoiceChat() {
       call.setLocalAudio(micOn)
       // 3. Whisper용 MediaRecorder 시작 (2초마다 청크)
       console.log('[VoiceChat] Setting up MediaRecorder for Whisper transcription...')
-      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
+      // Fallback: 브라우저가 지원하는 포맷을 자동 선택
+      let mimeType = '';
+      let fileExt = 'webm';
+      if (window.MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
+        mimeType = 'audio/webm;codecs=opus';
+        fileExt = 'webm';
+      } else if (window.MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+        fileExt = 'webm';
+      } else if (window.MediaRecorder.isTypeSupported('audio/ogg;codecs=opus')) {
+        mimeType = 'audio/ogg;codecs=opus';
+        fileExt = 'ogg';
+      } else {
+        alert('이 브라우저는 실시간 음성 전사를 지원하지 않습니다.');
+        return;
+      }
+      const recorder = new window.MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder
       recorder.ondataavailable = async (e) => {
         // 1. 빈 청크 무시
         if (!e.data || e.data.size === 0) return;
-        // 2. 타입 체크 (webm만 허용)
-        if (!e.data.type.startsWith('audio/webm')) return;
+        // 2. 타입 체크 (webm/ogg만 허용)
+        if (!(e.data.type.startsWith('audio/webm') || e.data.type.startsWith('audio/ogg'))) return;
         // 3. (향후) VAD 적용 시, 무음 구간은 전송하지 않도록 추가 가능
         if (dailySessionId) {
           const form = new FormData();
-          form.append('file', e.data, 'audio.webm');
+          form.append('file', e.data, `audio.${fileExt}`);
           form.append('userId', dailySessionId);
           form.append('timestamp', new Date().toISOString());
           try {
@@ -118,16 +134,6 @@ export default function VoiceChat() {
               if (data.text) {
                 // 콘솔에 실시간 출력
                 console.log(`[Whisper][${data.timestamp}] ${data.userId}: ${data.text}`);
-                setTranscripts((prev) => [
-                  ...prev,
-                  {
-                    id: `whisper-${data.timestamp}`,
-                    text: data.text,
-                    user: data.userId,
-                    isFinal: true,
-                    source: 'whisper',
-                  },
-                ]);
               }
             } else {
               const errText = await res.text();
@@ -139,7 +145,7 @@ export default function VoiceChat() {
         }
       }
       recorder.start(2000) // 2초마다 청크 (짧은 청크는 Whisper가 인식 못할 수 있음)
-      console.log('[VoiceChat] MediaRecorder started, recording every 3 seconds')
+      console.log('[VoiceChat] MediaRecorder started, recording every 2 seconds')
     } catch (err: any) {
       console.error('[VoiceChat] Failed to join audio room:', err)
       setErrorMsg('Failed to join audio room')
@@ -305,35 +311,6 @@ export default function VoiceChat() {
           </>
         )}
       </div>
-      {/* 트랜스크립션 자막 UI (whisper > daily 우선) */}
-      {joined && transcriptToShow && (
-        <div
-          style={{
-            position: 'fixed',
-            left: '50%',
-            bottom: 20,
-            transform: 'translateX(-50%)',
-            background: 'rgba(30,41,59,0.92)',
-            color: '#fff',
-            borderRadius: 16,
-            padding: '8px 20px',
-            fontSize: 18,
-            fontWeight: 500,
-            minWidth: 200,
-            maxWidth: 600,
-            textAlign: 'center',
-            boxShadow: '0 2px 12px #0003',
-            zIndex: 40,
-            pointerEvents: 'none',
-            opacity: 1,
-            transition: 'opacity 0.2s',
-          }}
-        >
-          <span style={{ color: transcriptToShow.source === 'whisper' ? '#38bdf8' : '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
-          <span>{transcriptToShow.text}</span>
-          {transcriptToShow.source === 'whisper' && <span style={{ fontSize: 12, color: '#38bdf8', marginLeft: 8 }}>(AI)</span>}
-        </div>
-      )}
     </>
   )
 } 
