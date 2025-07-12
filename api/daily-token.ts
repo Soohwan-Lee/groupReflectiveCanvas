@@ -24,8 +24,8 @@ export default async function handler(req: any, res: any) {
       body: JSON.stringify({
         properties: {
           room_name: roomName,
+          user_name: userName,
         },
-        user_name: userName,
         is_owner: true,
         permissions: {
           transcription: 'write',
