@@ -1,11 +1,15 @@
 // Vite env type for TypeScript
 /// <reference types="vite/client" />
+// 공식 문서: https://docs.daily.co/guides/products/transcription
+// auto_start_transcription(C 방식) 적용: join만 하면 자동으로 트랜스크립션이 시작됨
+// 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
+
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
 const ROOM_URL = 'https://soohwan.daily.co/xL84zG8xEXXiCrrARCR6'
 
-// 트랜스크립션 메시지 타입 정의
+// 트랜스크립션 메시지 타입 정의 (공식 문서 기반)
 interface TranscriptionMessage {
   text: string
   is_final: boolean
@@ -22,14 +26,13 @@ export default function VoiceChat() {
   const [joining, setJoining] = useState(false)
   // Track remote audio elements by participant session_id
   const audioElements = useRef<{ [id: string]: HTMLAudioElement }>({})
+  // 실시간 자막 상태
   const [transcripts, setTranscripts] = useState<{
     id: string
     text: string
     user: string
     isFinal: boolean
   }[]>([])
-  const [isTranscribing, setIsTranscribing] = useState(false)
-  const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
   // 참가자별 트랜스크립션 전체 로그 (메모리상)
   const transcriptLog = useRef<{
     user: string
@@ -47,25 +50,15 @@ export default function VoiceChat() {
         videoSource: false,
       })
       callRef.current = call
-      call.on('joined-meeting', async (e) => {
+      call.on('joined-meeting', (e) => {
         console.log('[Daily] joined-meeting', e)
         setJoined(true)
         setJoining(false)
-        // 트랜스크립션 자동 시작 (오너 권한 필요)
-        try {
-          setIsTranscribing(true)
-          await call.startTranscription()
-        } catch (err: any) {
-          setTranscriptionError('Failed to start transcription')
-          setIsTranscribing(false)
-        }
       })
       call.on('left-meeting', (e) => {
         console.log('[Daily] left-meeting', e)
         setJoined(false)
         setJoining(false)
-        setIsTranscribing(false)
-        setTranscriptionError(null)
         setTranscripts([])
         cleanupAudioElements()
       })
@@ -74,19 +67,7 @@ export default function VoiceChat() {
         setErrorMsg('Audio connection error')
         setAudioWorking(false)
       })
-      // 트랜스크립션 관련 이벤트 등록
-      call.on('transcription-started', () => {
-        setIsTranscribing(true)
-        setTranscriptionError(null)
-      })
-      call.on('transcription-stopped', () => {
-        setIsTranscribing(false)
-      })
-      call.on('transcription-error', (e: any) => {
-        setTranscriptionError('Transcription error')
-        setIsTranscribing(false)
-      })
-      // 실시간 자막 메시지 수신
+      // 실시간 자막 메시지 수신 (공식 문서: https://docs.daily.co/reference/daily-js/events/transcription-message)
       call.on('transcription-message', (ev: any) => {
         const msg = ev.data as TranscriptionMessage
         if (!msg || !msg.text) return
@@ -110,7 +91,7 @@ export default function VoiceChat() {
           timestamp: Date.now(),
         })
       })
-      await call.join({ url: ROOM_URL })
+      await call.join({ url: ROOM_URL }) // auto_start_transcription이 켜져 있으면 join만 하면 자동 전사
       call.setLocalAudio(micOn)
     } catch (err: any) {
       setErrorMsg('Failed to join audio room')
@@ -129,8 +110,6 @@ export default function VoiceChat() {
     setJoined(false)
     setAudioWorking(true)
     setErrorMsg(null)
-    setIsTranscribing(false)
-    setTranscriptionError(null)
     setTranscripts([])
     cleanupAudioElements()
   }
@@ -197,8 +176,7 @@ export default function VoiceChat() {
     audioElements.current = {}
   }
 
-  // 4. Minimal UI: join/leave/mic, bottom left, error indicator if audio not working
-  // 5. 실시간 트랜스크립션 UI (하단 중앙)
+  // 실시간 트랜스크립션 UI (하단 중앙)
   const transcriptToShow = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null
 
   return (
@@ -273,11 +251,6 @@ export default function VoiceChat() {
               ) : (
                 <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
               )}
-              {!audioWorking && (
-                <span style={{ position: 'absolute', top: 2, right: 2 }} title={errorMsg || 'Audio not working'}>
-                  <svg width="14" height="14" fill="none" stroke="red" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="1"/></svg>
-                </span>
-              )}
             </button>
           </>
         )}
@@ -306,18 +279,14 @@ export default function VoiceChat() {
             transition: 'opacity 0.2s',
           }}
         >
-          {isTranscribing ? (
-            transcriptToShow ? (
-              <>
-                <span style={{ color: '#38bdf8', marginRight: 8 }}>{transcriptToShow.user}:</span>
-                <span>{transcriptToShow.text}</span>
-              </>
-            ) : (
-              <span style={{ color: '#94a3b8' }}>Listening...</span>
-            )
-          ) : transcriptionError ? (
-            <span style={{ color: '#f87171' }}>{transcriptionError}</span>
-          ) : null}
+          {transcriptToShow ? (
+            <>
+              <span style={{ color: '#38bdf8', marginRight: 8 }}>{transcriptToShow.user}:</span>
+              <span>{transcriptToShow.text}</span>
+            </>
+          ) : (
+            <span style={{ color: '#94a3b8' }}>Listening...</span>
+          )}
         </div>
       )}
     </>
