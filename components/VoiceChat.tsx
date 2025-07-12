@@ -93,11 +93,13 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     if (!callRef.current) return
 
     const handleTransMsg = async (msg: any) => {
-      // Daily docs: msg contains fields: text, silent, speaker, timestamp, words
       if (!msg?.text) return
-      const participantId = msg.speaker
-      const participant = callRef.current?.participants()[participantId]
-      const userNameFromDaily = participant?.user_name || 'Unknown'
+
+      const participantInfo = msg.participant || {}
+      const participantId: string | undefined = participantInfo.session_id || msg.speaker
+      if (!participantId) return // unable to attribute, skip DB save
+
+      const userNameFromDaily: string = participantInfo.user_name || 'Unknown'
       const sessionIdStr = DAILY_URL
       const payload = {
         session_id: sessionIdStr,
@@ -148,7 +150,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         setJoining(false);
         setErrorMsg(null);
         try {
-          await callRef.current?.startTranscription()
+          await callRef.current?.startTranscription({ language: 'auto' })
         } catch (e) {
           console.warn('startTranscription error', e)
         }
