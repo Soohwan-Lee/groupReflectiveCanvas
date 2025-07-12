@@ -9,12 +9,17 @@ import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
 const ROOM_URL = 'https://soohwan.daily.co/xL84zG8xEXXiCrrARCR6'
 
-// 트랜스크립션 메시지 타입 정의 (공식 문서 기반)
 interface TranscriptionMessage {
   text: string
   is_final: boolean
   session_id: string
   user_name?: string
+}
+
+interface WhisperLog {
+  timestamp: string
+  userId: string
+  text: string
 }
 
 export default function VoiceChat() {
@@ -24,80 +29,118 @@ export default function VoiceChat() {
   const [audioWorking, setAudioWorking] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
-  // Track remote audio elements by participant session_id
   const audioElements = useRef<{ [id: string]: HTMLAudioElement }>({})
-  // 실시간 자막 상태
   const [transcripts, setTranscripts] = useState<{
     id: string
     text: string
     user: string
     isFinal: boolean
+    source: 'daily' | 'whisper'
   }[]>([])
-  // 참가자별 트랜스크립션 전체 로그 (메모리상)
   const transcriptLog = useRef<{
     user: string
     text: string
     timestamp: number
+    source: 'daily' | 'whisper'
   }[]>([])
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const whisperUserId = useRef(`user-${Math.random().toString(36).slice(2, 8)}`)
 
-  // 1. Join/leave logic (user gesture required)
+  // Join/leave logic
   const handleJoin = async () => {
     setJoining(true)
     try {
+      // 1. 마이크 스트림 획득 (한 번만)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      micStreamRef.current = stream
+      // 2. Daily에 스트림 전달
       const call = DailyIframe.createCallObject({
         userName: 'User',
-        audioSource: true,
+        audioSource: stream as any, // Type workaround: Daily types may expect boolean|string|MediaStreamTrack, but MediaStream works in practice
         videoSource: false,
       })
       callRef.current = call
       call.on('joined-meeting', (e) => {
-        console.log('[Daily] joined-meeting', e)
         setJoined(true)
         setJoining(false)
       })
       call.on('left-meeting', (e) => {
-        console.log('[Daily] left-meeting', e)
         setJoined(false)
         setJoining(false)
         setTranscripts([])
         cleanupAudioElements()
       })
       call.on('error', (e) => {
-        console.error('[Daily] error', e)
         setErrorMsg('Audio connection error')
         setAudioWorking(false)
       })
-      // 실시간 자막 메시지 수신 (공식 문서: https://docs.daily.co/reference/daily-js/events/transcription-message)
+      // Daily transcription-message (참고용, Whisper와 병행)
       call.on('transcription-message', (ev: any) => {
         const msg = ev.data as TranscriptionMessage
         if (!msg || !msg.text) return
         setTranscripts((prev) => [
           ...prev,
           {
-            id: `${msg.session_id}-${Date.now()}`,
+            id: `daily-${msg.session_id}-${Date.now()}`,
             text: msg.text,
             user: msg.user_name || msg.session_id,
             isFinal: msg.is_final,
+            source: 'daily',
           },
         ])
-        // 콘솔에 실시간 출력
-        const user = msg.user_name || msg.session_id
-        const time = new Date().toLocaleTimeString()
-        console.log(`[Transcript][${time}] ${user}: ${msg.text}`)
-        // 메모리상 로그에도 저장
         transcriptLog.current.push({
-          user,
+          user: msg.user_name || msg.session_id,
           text: msg.text,
           timestamp: Date.now(),
+          source: 'daily',
         })
       })
-      await call.join({ url: ROOM_URL }) // auto_start_transcription이 켜져 있으면 join만 하면 자동 전사
+      await call.join({ url: ROOM_URL })
       call.setLocalAudio(micOn)
+      // 3. Whisper용 MediaRecorder 시작
+      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = recorder
+      recorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 0) {
+          const form = new FormData()
+          form.append('file', e.data, 'audio.webm')
+          form.append('userId', whisperUserId.current)
+          form.append('timestamp', new Date().toISOString())
+          try {
+            const res = await fetch('/api/transcribe', {
+              method: 'POST',
+              body: form,
+            })
+            const data = await res.json()
+            if (data.text) {
+              setTranscripts((prev) => [
+                ...prev,
+                {
+                  id: `whisper-${data.timestamp}`,
+                  text: data.text,
+                  user: data.userId,
+                  isFinal: true,
+                  source: 'whisper',
+                },
+              ])
+              transcriptLog.current.push({
+                user: data.userId,
+                text: data.text,
+                timestamp: Date.now(),
+                source: 'whisper',
+              })
+            }
+          } catch (err) {
+            // ignore
+          }
+        }
+      }
+      recorder.start(3000) // 3초마다 청크
     } catch (err: any) {
       setErrorMsg('Failed to join audio room')
       setAudioWorking(false)
       setJoining(false)
-      console.error('[Daily] join error', err)
     }
   }
 
@@ -107,6 +150,14 @@ export default function VoiceChat() {
       callRef.current.destroy()
       callRef.current = null
     }
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop())
+      micStreamRef.current = null
+    }
     setJoined(false)
     setAudioWorking(true)
     setErrorMsg(null)
@@ -114,7 +165,6 @@ export default function VoiceChat() {
     cleanupAudioElements()
   }
 
-  // 2. Mic toggle (only after join)
   const handleMicToggle = () => {
     setMicOn((on) => {
       if (callRef.current) {
@@ -124,11 +174,9 @@ export default function VoiceChat() {
     })
   }
 
-  // 3. Minimal audio attach/detach logic per Daily best practice
   useEffect(() => {
     const call = callRef.current
     if (!call) return
-    // Attach remote audio on track-started
     const onTrackStarted = (ev: any) => {
       if (ev.track.kind !== 'audio' || ev.participant.local) return
       const sessionId = ev.participant.session_id
@@ -140,13 +188,11 @@ export default function VoiceChat() {
       audio.style.display = 'none'
       document.body.appendChild(audio)
       audioElements.current[sessionId] = audio
-      audio.play().catch((err) => {
-        console.error('Audio play() failed:', err)
+      audio.play().catch(() => {
         setErrorMsg('Audio playback blocked by browser')
         setAudioWorking(false)
       })
     }
-    // Remove audio on track-stopped
     const onTrackStopped = (ev: any) => {
       if (ev.track.kind !== 'audio' || ev.participant.local) return
       const sessionId = ev.participant.session_id
@@ -176,7 +222,7 @@ export default function VoiceChat() {
     audioElements.current = {}
   }
 
-  // 실시간 트랜스크립션 UI (하단 중앙)
+  // 가장 최근 transcript (whisper > daily 우선)
   const transcriptToShow = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null
 
   return (
@@ -281,8 +327,9 @@ export default function VoiceChat() {
         >
           {transcriptToShow ? (
             <>
-              <span style={{ color: '#38bdf8', marginRight: 8 }}>{transcriptToShow.user}:</span>
+              <span style={{ color: transcriptToShow.source === 'whisper' ? '#38bdf8' : '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
               <span>{transcriptToShow.text}</span>
+              {transcriptToShow.source === 'whisper' && <span style={{ fontSize: 12, color: '#38bdf8', marginLeft: 8 }}>(AI)</span>}
             </>
           ) : (
             <span style={{ color: '#94a3b8' }}>Listening...</span>
