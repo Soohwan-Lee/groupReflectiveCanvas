@@ -3,11 +3,13 @@
  *  – multipart/form-data 파싱 : busboy
  *  – OpenAI Whisper 호출     : fetch + FormData (formdata-node)
  *  – 인-메모리 로그          : logs[]
+ *  – Supabase 저장           : transcripts 테이블
  *  ------------------------------------------------------------------*/
 
 import Busboy from 'busboy';
 import type { Readable } from 'stream';
 import { FormData, Blob, File } from 'formdata-node';
+import { createClient } from '@supabase/supabase-js';
 
 // 메모리·디버깅용(필요 없으면 삭제 가능)
 const logs: Array<{ timestamp: string; userId: string; text: string }> = [];
@@ -16,6 +18,12 @@ export const config = {
   runtime: 'nodejs20.x',        // (선택) 필요 시 vercel.json 대신 여기서 지정
   maxDuration: 30,              // Whisper 응답 지연 대비 (초)
 };
+
+// Supabase 클라이언트 생성 (환경변수 필요)
+const supabase = createClient(
+  process.env.SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
 
 export default async function handler(req: any, res: any) {
   console.log('[Transcribe API] Request received - Method:', req.method, 'Content-Type:', req.headers['content-type']);
@@ -103,6 +111,24 @@ export default async function handler(req: any, res: any) {
   console.log('[Transcribe API] Whisper API response:', whisperResponse);
   const { text = '' } = whisperResponse;
 
+  /* ───────────────────── Supabase 저장 ────────────────────────────── */
+  console.log('[Transcribe API] Saving transcription to Supabase...');
+  const { error: supabaseError } = await supabase
+    .from('transcripts')
+    .insert([
+      {
+        session_id: userId, // 필요시 별도 세션ID 사용
+        user_id: userId,
+        text,
+        timestamp: new Date(timestamp),
+      },
+    ]);
+  if (supabaseError) {
+    console.error('[Transcribe API] Supabase insert error:', supabaseError);
+  } else {
+    console.log('[Transcribe API] Supabase insert successful.');
+  }
+
   /* ───────────────────── 결과 반환 & 로그 ──────────────────────────── */
   const entry = { timestamp, userId, text };
   logs.push(entry);
@@ -110,91 +136,4 @@ export default async function handler(req: any, res: any) {
   console.log('[Transcribe API] Total transcriptions in memory:', logs.length);
 
   return res.status(200).json(entry);
-}
-
-// // import type { VercelRequest, VercelResponse } from '@vercel/node';
-// import { Readable } from 'stream';
-// import Busboy from 'busboy';
-// import { FormData, Blob } from 'formdata-node';
-// // node-fetch import 제거, Node 18+ 내장 fetch 사용
-
-// const logs: Array<{ timestamp: string; userId: string; text: string }> = [];
-
-// export default async function handler(req: any, res: any) {
-//   if (req.method !== 'POST') {
-//     return res.status(405).json({ error: 'Method not allowed' });
-//   }
-
-//   try {
-//     const contentType = req.headers['content-type'] || '';
-//     if (!contentType.startsWith('multipart/form-data')) {
-//       return res.status(400).json({ error: 'Content-Type must be multipart/form-data' });
-//     }
-
-//     // Parse multipart form
-//     const bb = Busboy({ headers: req.headers });
-//     let userId = '';
-//     let timestamp = '';
-//     let audioBuffer: Buffer | null = null;
-
-//     await new Promise<void>((resolve, reject) => {
-//       bb.on('file', (name: string, file: Readable, info: any) => {
-//         const chunks: Buffer[] = [];
-//         file.on('data', (data: Buffer) => chunks.push(data));
-//         file.on('end', () => {
-//           audioBuffer = Buffer.concat(chunks);
-//         });
-//       });
-//       bb.on('field', (name: string, val: string) => {
-//         if (name === 'userId') userId = val;
-//         if (name === 'timestamp') timestamp = val;
-//       });
-//       bb.on('finish', resolve);
-//       bb.on('error', reject);
-//       req.pipe(bb);
-//     });
-
-//     if (!audioBuffer || !userId || !timestamp) {
-//       return res.status(400).json({ error: 'Missing audio, userId, or timestamp' });
-//     }
-
-//     // Call OpenAI Whisper (whisper-1)
-//     const openaiApiKey = process.env.OPENAI_API_KEY;
-//     if (!openaiApiKey) {
-//       return res.status(500).json({ error: 'Missing OpenAI API key' });
-//     }
-
-//     const formData = new FormData();
-//     formData.append('file', new Blob([audioBuffer]), 'audio.webm'); // 확장자 webm으로!
-//     formData.append('model', 'whisper-1');
-//     formData.append('response_format', 'json');
-//     formData.append('language', 'ko');
-
-//     // Node 18+ 내장 fetch 사용
-//     const openaiRes = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-//       method: 'POST',
-//       headers: {
-//         'Authorization': `Bearer ${openaiApiKey}`,
-//       },
-//       body: formData as any,
-//     });
-
-//     if (!openaiRes.ok) {
-//       const err = await openaiRes.text();
-//       return res.status(500).json({ error: 'OpenAI API error', detail: err });
-//     }
-
-//     const data = await openaiRes.json();
-//     const text = data.text || '';
-
-//     // Log to memory and console
-//     const log = { timestamp, userId, text };
-//     logs.push(log);
-//     console.log(log);
-
-//     return res.status(200).json({ text, timestamp, userId });
-//   } catch (e: any) {
-//     console.error('Transcribe API error:', e);
-//     return res.status(500).json({ error: e.message || String(e) });
-//   }
-// } 
+} 
