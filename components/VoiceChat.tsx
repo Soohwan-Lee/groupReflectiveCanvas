@@ -37,9 +37,12 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     if (!audioBlob || audioBlob.size < 1000) return;
     const form = new FormData();
     form.append('file', audioBlob, 'audio.webm');
-    form.append('speaker_id', currentSpeakerId || 'unknown');
     form.append('userName', userName);
-    form.append('timestamp', new Date().toISOString());
+    form.append('sessionId', currentSpeakerId || 'unknown');
+    // 아래 3개는 실제 Whisper 결과로 채워야 하지만, 우선 임시값으로라도 채움
+    form.append('start_time', new Date().toISOString());
+    form.append('end_time', new Date(Date.now() + 1000).toISOString());
+    form.append('text', '[transcript placeholder]');
     try {
       const res = await fetch('/api/transcribe', {
         method: 'POST',
