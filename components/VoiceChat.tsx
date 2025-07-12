@@ -128,7 +128,7 @@ export default function VoiceChat() {
 
   // 4. Minimal UI: join/leave/mic, bottom left, error indicator if audio not working
   return (
-    <div style={{ position: 'fixed', left: 20, bottom: 20, zIndex: 30, display: 'flex', gap: 8 }}>
+    <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
       {!joined ? (
         <button
           onClick={handleJoin}
