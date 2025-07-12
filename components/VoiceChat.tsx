@@ -5,7 +5,7 @@
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
 import React, { useRef, useState, useEffect } from 'react'
-// import * as VAD from '@ricky0123/vad'  // VAD 완전 제거
+import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
 interface VoiceChatProps {
   userName: string;
@@ -17,21 +17,69 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [micOn, setMicOn] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [transcripts, setTranscripts] = useState<any[]>([])
-  const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null) // Daily 연동용
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const streamRef = useRef<MediaStream | null>(null)
+  const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null)
+  const callRef = useRef<DailyCall | null>(null)
 
-  // Daily active-speaker-change 이벤트로 speakerId 추적 (실제 연동 시 아래 코드 사용)
-  // useEffect(() => {
-  //   call.on('active-speaker-change', p => setCurrentSpeakerId(p.session_id));
-  // }, []);
+  // Daily call 객체 생성 및 관리
+  const DAILY_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR';
 
-  // 임시: userName을 speakerId로 사용
   useEffect(() => {
-    setCurrentSpeakerId(userName)
-  }, [userName])
+    return () => {
+      if (callRef.current) {
+        callRef.current.leave();
+        callRef.current.destroy();
+        callRef.current = null;
+      }
+    };
+  }, []);
 
+  const joinCall = async () => {
+    setJoining(true)
+    try {
+      if (!callRef.current) {
+        callRef.current = DailyIframe.createCallObject();
+      }
+      callRef.current.on('joined-meeting', () => {
+        setJoined(true);
+        setJoining(false);
+        setErrorMsg(null);
+      });
+      callRef.current.on('left-meeting', () => {
+        setJoined(false);
+        setJoining(false);
+      });
+      callRef.current.on('active-speaker-change', (ev) => {
+        setCurrentSpeakerId(ev.activeSpeaker.peerId);
+      });
+      callRef.current.on('error', (ev) => {
+        setErrorMsg('Daily error: ' + ev.errorMsg);
+      });
+      await callRef.current.join({
+        url: DAILY_URL,
+        userName,
+      });
+    } catch (err) {
+      setErrorMsg('Failed to join Daily call');
+      setJoining(false);
+    }
+  };
+
+  const leaveCall = () => {
+    if (callRef.current) {
+      callRef.current.leave();
+    }
+  };
+
+  const handleMicToggle = () => {
+    setMicOn((on) => {
+      if (callRef.current) {
+        callRef.current.setLocalAudio(!on);
+      }
+      return !on;
+    });
+  };
+
+  // (Whisper chunk 전송용 MediaRecorder 코드는 별도 hook/함수로 분리, 아래는 주석 처리)
   // 오디오 chunk를 Whisper로 전송
   const sendAudioChunkToWhisper = async (audioBlob: Blob) => {
     if (!audioBlob || audioBlob.size < 1000) return;
@@ -63,54 +111,26 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }
 
-  const startRecording = async () => {
-    setJoining(true)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/ogg'
-      const mediaRecorder = new MediaRecorder(stream, { mimeType })
-      mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0 && micOn) {
-          sendAudioChunkToWhisper(e.data)
-        }
-      }
-      mediaRecorder.onstop = () => {
-        stream.getTracks().forEach(track => track.stop())
-      }
-      mediaRecorder.start(15000) // 15초마다 chunk
-      setJoined(true)
-      setJoining(false)
-    } catch (err) {
-      setErrorMsg('Failed to start voice chat')
-      setJoining(false)
-    }
-  }
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop()
-      mediaRecorderRef.current = null
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop())
-      streamRef.current = null
-    }
-    setJoined(false)
-    setJoining(false)
-  }
-
-  const handleMicToggle = () => {
-    setMicOn((on) => !on)
-  }
+  // 오디오 트랙 상태는 participant-updated 이벤트에서 확인 가능
+  useEffect(() => {
+    if (!callRef.current) return;
+    const handler = (ev: any) => {
+      // ev.participant 오브젝트에 오디오 상태 등 정보가 있음
+      // 예: ev.participant.audio, ev.participant.user_name 등
+      // 필요시 상태 업데이트 가능
+      // console.log('participant-updated', ev.participant);
+    };
+    callRef.current.on('participant-updated', handler);
+    return () => {
+      callRef.current?.off('participant-updated', handler);
+    };
+  }, [callRef.current]);
 
   return (
     <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
       {!joined ? (
         <button
-          onClick={startRecording}
+          onClick={joinCall}
           style={{
             minWidth: 100,
             height: 40,
@@ -133,7 +153,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       ) : (
         <>
           <button
-            onClick={stopRecording}
+            onClick={leaveCall}
             style={{
               minWidth: 40,
               height: 40,
