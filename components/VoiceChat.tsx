@@ -5,7 +5,7 @@
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
 import React, { useRef, useState } from 'react'
-import * as VAD from '@ricky0123/vad'
+// import * as VAD from '@ricky0123/vad'  // (정적 import 제거)
 
 interface VoiceChatProps {
   userName: string;
@@ -79,6 +79,8 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       const audioContext = new AudioContext({ sampleRate: 16000 })
       audioContextRef.current = audioContext
+      // dynamic import로 변경
+      const VAD = await import('@ricky0123/vad')
       vadRef.current = await VAD.MicVAD.new({
         onSpeechStart: () => {},
         onSpeechEnd: async (audio: Float32Array) => {
