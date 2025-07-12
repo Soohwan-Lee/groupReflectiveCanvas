@@ -58,7 +58,8 @@ export default async function handler(req: any, res: any) {
     return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
 
   // Whisper 호출 (verbose_json)
-  const webmBlob = new Blob([audioBuffer], { type: 'audio/webm' });
+  const webmBlob = new Blob([audioBuffer], { type: 'audio/webm;codecs=opus' });
+  console.log('[Transcribe API] Received audioBuffer, sending as audio/webm;codecs=opus, size:', audioBuffer ? audioBuffer.length : 0);
   const form = new FormData();
   form.append('file', webmBlob, 'audio.webm');
   form.append('model', 'whisper-1');

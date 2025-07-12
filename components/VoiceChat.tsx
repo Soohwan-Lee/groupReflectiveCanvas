@@ -94,9 +94,10 @@ export default function VoiceChat() {
       call.setLocalAudio(micOn)
       // 3. Whisper용 MediaRecorder 시작 (3초마다 청크)
       console.log('[VoiceChat] Setting up MediaRecorder for Whisper transcription...')
-      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm' })
+      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' })
       mediaRecorderRef.current = recorder
       recorder.ondataavailable = async (e) => {
+        console.log('MediaRecorder chunk type:', e.data.type);
         const currentSessionId = dailySessionId || (call && call.participants().local?.session_id) || whisperUserId.current
         console.log('[VoiceChat] MediaRecorder data available:', e.data?.size, 'bytes, Session ID:', currentSessionId)
         if (e.data && e.data.size > 0 && currentSessionId) {
