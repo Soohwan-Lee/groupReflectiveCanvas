@@ -150,7 +150,9 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         setJoining(false);
         setErrorMsg(null);
         try {
-          await callRef.current?.startTranscription({ language: 'auto' })
+          await callRef.current?.startTranscription()
+          // debug: see transcription start success
+          console.log('Live transcription started')
         } catch (e) {
           console.warn('startTranscription error', e)
         }
