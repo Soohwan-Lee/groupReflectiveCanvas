@@ -6,31 +6,49 @@
  *  ------------------------------------------------------------------*/
 
 import { createClient } from '@supabase/supabase-js';
+const Busboy = require('busboy');
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+export const config = {
+  api: {
+    bodyParser: false, // 반드시 꺼야 함 (busboy 사용)
+  },
+};
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST')
     return res.status(405).json({ error: 'Method not allowed' });
 
-  const { userName, sessionId, start_time, end_time, text } = req.body;
-  if (!userName || !sessionId || !start_time || !end_time || !text)
-    return res.status(400).json({ error: 'Missing required fields' });
+  const busboy = new Busboy({ headers: req.headers });
+  const fields: any = {};
 
-  const { error } = await supabase.from('transcripts').insert([
-    {
-      user_name: userName,
-      session_id: sessionId,
-      start_time: new Date(start_time),
-      end_time: new Date(end_time),
-      text,
-    },
-  ]);
-  if (error) {
-    return res.status(500).json({ error: 'Supabase insert error', detail: error });
-  }
-  return res.status(200).json({ ok: true });
+  busboy.on('field', (fieldname, val) => {
+    fields[fieldname] = val;
+  });
+
+  busboy.on('finish', async () => {
+    const { userName, sessionId, start_time, end_time, text } = fields;
+    if (!userName || !sessionId || !start_time || !end_time || !text)
+      return res.status(400).json({ error: 'Missing required fields' });
+
+    const { error } = await supabase.from('transcripts').insert([
+      {
+        user_name: userName,
+        session_id: sessionId,
+        start_time: new Date(start_time),
+        end_time: new Date(end_time),
+        text,
+      },
+    ]);
+    if (error) {
+      return res.status(500).json({ error: 'Supabase insert error', detail: error });
+    }
+    return res.status(200).json({ ok: true });
+  });
+
+  req.pipe(busboy);
 } 
