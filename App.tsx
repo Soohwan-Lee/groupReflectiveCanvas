@@ -2,15 +2,13 @@ import React from 'react'
 import { TldrawProvider } from './providers/TldrawProvider'
 import Canvas from './components/canvas/Canvas'
 import VoiceChat from './components/VoiceChat'
-import VoiceTranscriber from './components/ui/VoiceTranscriber'
 
 const App: React.FC = () => {
   return (
     <TldrawProvider>
       <div style={{ width: '100vw', height: '100vh', display: 'flex', background: '#f8fafc', position: 'relative' }}>
         <VoiceChat />
-        <VoiceTranscriber />
-        {/* AI/Voice/Sidebar components can be added here */}
+        {/* Whisper 실시간 전사, 녹음 시작 UI 완전 제거 */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Canvas />
         </div>

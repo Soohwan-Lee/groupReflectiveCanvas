@@ -34,6 +34,7 @@ export default function VoiceChat() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
   const whisperUserId = useRef(`user-${Math.random().toString(36).slice(2, 8)}`)
+  const [dailySessionId, setDailySessionId] = useState<string | null>(null);
 
   // Join/leave logic
   const handleJoin = async () => {
@@ -53,6 +54,10 @@ export default function VoiceChat() {
       call.on('joined-meeting', (e) => {
         setJoined(true)
         setJoining(false)
+        // Daily 참가자 session_id 저장
+        if (call && call.participants().local) {
+          setDailySessionId(call.participants().local.session_id)
+        }
       })
       call.on('left-meeting', (e) => {
         setJoined(false)
@@ -85,10 +90,10 @@ export default function VoiceChat() {
       const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm' })
       mediaRecorderRef.current = recorder
       recorder.ondataavailable = async (e) => {
-        if (e.data && e.data.size > 0) {
+        if (e.data && e.data.size > 0 && dailySessionId) {
           const form = new FormData()
           form.append('file', e.data, 'audio.webm')
-          form.append('userId', whisperUserId.current)
+          form.append('userId', dailySessionId)
           form.append('timestamp', new Date().toISOString())
           try {
             const res = await fetch('/api/transcribe', {
@@ -99,6 +104,8 @@ export default function VoiceChat() {
             if (res.ok && contentType.includes('application/json')) {
               const data = await res.json()
               if (data.text) {
+                // 콘솔에 실시간 출력
+                console.log(`[Whisper][${data.timestamp}] ${data.userId}: ${data.text}`)
                 setTranscripts((prev) => [
                   ...prev,
                   {
@@ -111,7 +118,6 @@ export default function VoiceChat() {
                 ])
               }
             } else {
-              // Whisper API 에러 메시지 처리
               const errText = await res.text()
               console.error('Transcribe error', errText)
             }
