@@ -1,7 +1,7 @@
 // Vite env type for TypeScript
 /// <reference types="vite/client" />
 import React, { useEffect, useRef, useState } from 'react'
-import DailyIframe, { DailyCall, DailyEventObjectParticipant, DailyEventObjectTrack } from '@daily-co/daily-js'
+import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
 const ROOM_URL = 'https://soohwan.daily.co/xL84zG8xEXXiCrrARCR6'
 
@@ -12,6 +12,7 @@ export default function VoiceChat() {
   const [audioWorking, setAudioWorking] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [joining, setJoining] = useState(false)
+  // Track remote audio elements by participant session_id
   const audioElements = useRef<{ [id: string]: HTMLAudioElement }>({})
 
   // 1. Join/leave logic (user gesture required)
@@ -22,55 +23,19 @@ export default function VoiceChat() {
         userName: 'User',
         audioSource: true,
         videoSource: false,
-        subscribeToTracksAutomatically: false,
+        // subscribeToTracksAutomatically: true (default)
       })
       callRef.current = call
       call.on('joined-meeting', (e) => {
         console.log('[Daily] joined-meeting', e)
         setJoined(true)
         setJoining(false)
-        // Subscribe to all remote audio tracks
-        const participants = call.participants()
-        Object.keys(participants).forEach((id) => {
-          if (id !== 'local') subscribeToAudio(id)
-        })
       })
       call.on('left-meeting', (e) => {
         console.log('[Daily] left-meeting', e)
         setJoined(false)
         setJoining(false)
         cleanupAudioElements()
-      })
-      call.on('participant-joined', (e: DailyEventObjectParticipant) => {
-        console.log('[Daily] participant-joined', e)
-        if (e.participant && e.participant.session_id !== call.participants().local.session_id) {
-          subscribeToAudio(e.participant.session_id)
-        }
-      })
-      call.on('participant-updated', (e: DailyEventObjectParticipant) => {
-        console.log('[Daily] participant-updated', e)
-        if (e.participant && e.participant.session_id !== call.participants().local.session_id) {
-          subscribeToAudio(e.participant.session_id)
-        }
-      })
-      call.on('track-started', (e: DailyEventObjectTrack) => {
-        console.log('[Daily] track-started', e)
-        if (e.participant && e.participant.session_id !== call.participants().local.session_id && e.track && e.track.kind === 'audio') {
-          attachAudio(e.participant.session_id, e.track)
-          setAudioWorking(true)
-        }
-      })
-      call.on('track-stopped', (e: DailyEventObjectTrack) => {
-        console.log('[Daily] track-stopped', e)
-        if (e.participant && e.participant.session_id !== call.participants().local.session_id && e.track && e.track.kind === 'audio') {
-          detachAudio(e.participant.session_id)
-        }
-      })
-      call.on('participant-left', (e: { participant: { session_id: string } }) => {
-        console.log('[Daily] participant-left', e)
-        if (e.participant && e.participant.session_id) {
-          detachAudio(e.participant.session_id)
-        }
       })
       call.on('error', (e) => {
         console.error('[Daily] error', e)
@@ -109,31 +74,56 @@ export default function VoiceChat() {
     })
   }
 
-  // 3. Manual audio subscribe/attach/detach
-  function subscribeToAudio(sessionId: string) {
-    if (!callRef.current) return
-    callRef.current.updateParticipant(sessionId, { setSubscribedTracks: { audio: true } })
-  }
-  function attachAudio(sessionId: string, track: MediaStreamTrack) {
-    if (audioElements.current[sessionId]) return
-    const audio = document.createElement('audio')
-    audio.autoplay = true
-    audio.srcObject = new MediaStream([track])
-    audio.style.display = 'none'
-    document.body.appendChild(audio)
-    audioElements.current[sessionId] = audio
-  }
-  function detachAudio(sessionId: string) {
-    const audio = audioElements.current[sessionId]
-    if (audio) {
+  // 3. Minimal audio attach/detach logic per Daily best practice
+  useEffect(() => {
+    const call = callRef.current
+    if (!call) return
+    // Attach remote audio on track-started
+    const onTrackStarted = (ev: any) => {
+      if (ev.track.kind !== 'audio' || ev.participant.local) return
+      const sessionId = ev.participant.session_id
+      if (audioElements.current[sessionId]) return
+      const audio = document.createElement('audio') as HTMLAudioElement & { playsInline?: boolean }
+      audio.autoplay = true
+      audio.playsInline = true
+      audio.srcObject = new MediaStream([ev.track])
+      audio.style.display = 'none'
+      document.body.appendChild(audio)
+      audioElements.current[sessionId] = audio
+      audio.play().catch((err) => {
+        console.error('Audio play() failed:', err)
+        setErrorMsg('Audio playback blocked by browser')
+        setAudioWorking(false)
+      })
+    }
+    // Remove audio on track-stopped
+    const onTrackStopped = (ev: any) => {
+      if (ev.track.kind !== 'audio' || ev.participant.local) return
+      const sessionId = ev.participant.session_id
+      const audio = audioElements.current[sessionId]
+      if (audio) {
+        audio.pause()
+        audio.srcObject = null
+        if (audio.parentNode) audio.parentNode.removeChild(audio)
+        delete audioElements.current[sessionId]
+      }
+    }
+    call.on('track-started', onTrackStarted)
+    call.on('track-stopped', onTrackStopped)
+    return () => {
+      call.off('track-started', onTrackStarted)
+      call.off('track-stopped', onTrackStopped)
+      cleanupAudioElements()
+    }
+  }, [callRef.current])
+
+  function cleanupAudioElements() {
+    Object.values(audioElements.current).forEach((audio) => {
       audio.pause()
       audio.srcObject = null
       if (audio.parentNode) audio.parentNode.removeChild(audio)
-      delete audioElements.current[sessionId]
-    }
-  }
-  function cleanupAudioElements() {
-    Object.keys(audioElements.current).forEach(detachAudio)
+    })
+    audioElements.current = {}
   }
 
   // 4. Minimal UI: join/leave/mic, bottom left, error indicator if audio not working
