@@ -4,7 +4,7 @@
 // auto_start_transcription(C 방식) 적용: join만 하면 자동으로 트랜스크립션이 시작됨
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 // 기존 VAD/Whisper 관련 import 제거
 // import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 // import { MicVAD } from '@ricky0123/vad'
@@ -36,7 +36,6 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       ws.onopen = () => {
         setJoined(true)
         setJoining(false)
-        // 오디오 스트림을 ScriptProcessor로 PCM 청크로 변환해 WebSocket으로 전송
         const audioContext = new AudioContext({ sampleRate: 16000 })
         audioContextRef.current = audioContext
         const source = audioContext.createMediaStreamSource(stream)
@@ -48,7 +47,6 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         processor.onaudioprocess = (e) => {
           if (!micOn) return
           const input = e.inputBuffer.getChannelData(0)
-          // Float32Array -> Int16Array 변환 (PCM 16bit)
           const pcm = new Int16Array(input.length)
           for (let i = 0; i < input.length; i++) {
             let s = Math.max(-1, Math.min(1, input[i]))
@@ -56,7 +54,6 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
           }
           ws.send(pcm.buffer)
         }
-        // 세션 설정: VAD 모드 등
         ws.send(JSON.stringify({
           type: 'session.update',
           session: {
@@ -78,9 +75,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
           // 음성 종료 이벤트 처리 (원하면 UI 표시)
         }
         if (data.type === 'transcript') {
-          // 실시간 전사 결과 처리 (DB 저장 등)
           setTranscripts((prev) => [...prev, { ...data, userName }])
-          // 필요시 Supabase에 저장 fetch('/api/saveTranscript', ...)
         }
       }
       ws.onerror = (e) => {
@@ -107,16 +102,83 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     setJoining(false)
   }
 
+  const handleMicToggle = () => {
+    setMicOn((on) => !on)
+  }
+
   return (
     <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
       {!joined ? (
-        <button onClick={startRealtimeTranscription} disabled={joining}>
+        <button
+          onClick={startRealtimeTranscription}
+          style={{
+            minWidth: 100,
+            height: 40,
+            borderRadius: 20,
+            background: '#2563eb',
+            color: '#fff',
+            border: 'none',
+            fontWeight: 600,
+            fontSize: 15,
+            boxShadow: '0 2px 8px #0002',
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+            padding: '0 20px',
+            opacity: joining ? 0.6 : 1,
+          }}
+          disabled={joining}
+        >
           {joining ? 'Joining...' : 'Join Voice'}
         </button>
       ) : (
-        <button onClick={stopRealtimeTranscription}>Leave</button>
+        <>
+          <button
+            onClick={stopRealtimeTranscription}
+            style={{
+              minWidth: 40,
+              height: 40,
+              borderRadius: 20,
+              background: '#e11d48',
+              color: '#fff',
+              border: 'none',
+              fontWeight: 600,
+              fontSize: 15,
+              boxShadow: '0 2px 8px #0002',
+              cursor: 'pointer',
+              transition: 'background 0.2s',
+              padding: '0 16px',
+            }}
+          >
+            Leave
+          </button>
+          <button
+            onClick={handleMicToggle}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              background: micOn ? 'rgba(34,197,94,0.92)' : 'rgba(239,68,68,0.92)',
+              color: '#fff',
+              border: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px #0002',
+              cursor: 'pointer',
+              transition: 'background 0.2s',
+              position: 'relative',
+            }}
+            aria-label={micOn ? 'Turn mic off' : 'Turn mic on'}
+            title={micOn ? 'Mic On' : 'Mic Off'}
+          >
+            {micOn ? (
+              <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>
+            ) : (
+              <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            )}
+          </button>
+        </>
       )}
-      {/* 실시간 전사 결과(예시) */}
       <div style={{ marginLeft: 16 }}>
         {transcripts.slice(-3).map((t, i) => (
           <div key={i} style={{ fontSize: 14, color: '#222' }}>
