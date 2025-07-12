@@ -18,6 +18,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null)
   const callRef = useRef<DailyCall | null>(null)
+  const remoteAudios = useRef<Record<string, HTMLAudioElement>>({})
 
   // Daily 룸 URL (퍼블릭 룸, 토큰 불필요)
   const DAILY_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR';
@@ -31,6 +32,60 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       }
     };
   }, []);
+
+  // remote audio attach / detach helpers
+  const attachRemoteAudio = (participantId: string, track: MediaStreamTrack) => {
+    const stream = new MediaStream([track])
+    const audioEl = new Audio()
+    audioEl.srcObject = stream
+    audioEl.autoplay = true
+    audioEl.setAttribute('playsinline', 'true')
+    audioEl.muted = false
+    // 꼬여서 무음이 되는 것을 방지하기 위해 volume 1 유지
+    audioEl.volume = 1
+    remoteAudios.current[participantId] = audioEl
+  }
+
+  const detachRemoteAudio = (participantId: string) => {
+    const audioEl = remoteAudios.current[participantId]
+    if (audioEl) {
+      audioEl.pause()
+      // 스트림 정리
+      const stream = audioEl.srcObject as MediaStream | null
+      stream?.getTracks().forEach((t) => t.stop())
+      audioEl.srcObject = null
+      delete remoteAudios.current[participantId]
+    }
+  }
+
+  // register track-started / track-stopped / participant-left listeners once after call object exists
+  useEffect(() => {
+    if (!callRef.current) return
+
+    const handleTrackStarted = (ev: any) => {
+      if (ev.track.kind === 'audio' && ev.participant.session_id !== callRef.current?.participants().local?.session_id) {
+        attachRemoteAudio(ev.participant.session_id, ev.track)
+      }
+    }
+    const handleTrackStopped = (ev: any) => {
+      if (ev.track.kind === 'audio') {
+        detachRemoteAudio(ev.participant.session_id)
+      }
+    }
+    const handleParticipantLeft = (ev: any) => {
+      detachRemoteAudio(ev.participant.session_id)
+    }
+
+    callRef.current.on('track-started', handleTrackStarted)
+    callRef.current.on('track-stopped', handleTrackStopped)
+    callRef.current.on('participant-left', handleParticipantLeft)
+
+    return () => {
+      callRef.current?.off('track-started', handleTrackStarted)
+      callRef.current?.off('track-stopped', handleTrackStopped)
+      callRef.current?.off('participant-left', handleParticipantLeft)
+    }
+  }, [callRef.current])
 
   const joinCall = async () => {
     setJoining(true)
@@ -56,6 +111,8 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       await callRef.current.join({
         url: DAILY_URL,
         userName,
+        audioSource: true,
+        videoSource: false,
       });
     } catch (err) {
       setErrorMsg('Failed to join Daily call');
