@@ -1,4 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+// import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { Readable } from 'stream';
 import Busboy from 'busboy';
 import { FormData, Blob } from 'formdata-node';
@@ -6,7 +6,7 @@ import { FormData, Blob } from 'formdata-node';
 
 const logs: Array<{ timestamp: string; userId: string; text: string }> = [];
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -44,14 +44,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Missing audio, userId, or timestamp' });
     }
 
-    // Call OpenAI Whisper (gpt-4o-transcribe-mini)
+    // Call OpenAI Whisper (whisper-1)
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
       return res.status(500).json({ error: 'Missing OpenAI API key' });
     }
 
     const formData = new FormData();
-    formData.append('file', new Blob([audioBuffer]), 'audio.wav');
+    formData.append('file', new Blob([audioBuffer]), 'audio.webm'); // 확장자 webm으로!
     formData.append('model', 'whisper-1');
     formData.append('response_format', 'json');
     formData.append('language', 'ko');
