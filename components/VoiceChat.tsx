@@ -7,7 +7,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
-// 실시간 전사, 녹음, 저장 등은 하지 않음. 오직 Daily 음성채팅만 동작
 const ROOM_URL = 'https://soohwan.daily.co/upOFJOWxqCOhRYldrIsR'
 
 interface TranscriptionMessage {
@@ -30,7 +29,11 @@ export default function VoiceChat() {
     text: string
     user: string
     isFinal: boolean
+    source: 'daily' | 'whisper'
   }[]>([])
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const micStreamRef = useRef<MediaStream | null>(null)
+  const whisperUserId = useRef(`user-${Math.random().toString(36).slice(2, 8)}`)
 
   // Join/leave logic
   const handleJoin = async () => {
@@ -38,11 +41,12 @@ export default function VoiceChat() {
     try {
       // 1. 마이크 스트림 획득 (한 번만)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      micStreamRef.current = stream
       const audioTrack = stream.getAudioTracks()[0]
       // 2. Daily에 오디오 트랙만 전달
       const call = DailyIframe.createCallObject({
         userName: 'User',
-        audioSource: audioTrack, // MediaStreamTrack만 전달
+        audioSource: audioTrack,
         videoSource: false,
       })
       callRef.current = call
@@ -71,11 +75,52 @@ export default function VoiceChat() {
             text: msg.text,
             user: msg.user_name || msg.session_id,
             isFinal: msg.is_final,
+            source: 'daily',
           },
         ])
       })
       await call.join({ url: ROOM_URL })
       call.setLocalAudio(micOn)
+      // 3. Whisper용 MediaRecorder 시작 (3초마다 청크)
+      const recorder = new window.MediaRecorder(stream, { mimeType: 'audio/webm' })
+      mediaRecorderRef.current = recorder
+      recorder.ondataavailable = async (e) => {
+        if (e.data && e.data.size > 0) {
+          const form = new FormData()
+          form.append('file', e.data, 'audio.webm')
+          form.append('userId', whisperUserId.current)
+          form.append('timestamp', new Date().toISOString())
+          try {
+            const res = await fetch('/api/transcribe', {
+              method: 'POST',
+              body: form,
+            })
+            const contentType = res.headers.get('content-type') || ''
+            if (res.ok && contentType.includes('application/json')) {
+              const data = await res.json()
+              if (data.text) {
+                setTranscripts((prev) => [
+                  ...prev,
+                  {
+                    id: `whisper-${data.timestamp}`,
+                    text: data.text,
+                    user: data.userId,
+                    isFinal: true,
+                    source: 'whisper',
+                  },
+                ])
+              }
+            } else {
+              // Whisper API 에러 메시지 처리
+              const errText = await res.text()
+              console.error('Transcribe error', errText)
+            }
+          } catch (err) {
+            console.error('Transcribe error', err)
+          }
+        }
+      }
+      recorder.start(3000) // 3초마다 청크
     } catch (err: any) {
       setErrorMsg('Failed to join audio room')
       setAudioWorking(false)
@@ -88,6 +133,14 @@ export default function VoiceChat() {
       callRef.current.leave()
       callRef.current.destroy()
       callRef.current = null
+    }
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop()
+      mediaRecorderRef.current = null
+    }
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach((t) => t.stop())
+      micStreamRef.current = null
     }
     setJoined(false)
     setAudioWorking(true)
@@ -153,7 +206,7 @@ export default function VoiceChat() {
     audioElements.current = {}
   }
 
-  // 가장 최근 transcript (Daily 자막)
+  // 가장 최근 transcript (whisper > daily 우선)
   const transcriptToShow = transcripts.length > 0 ? transcripts[transcripts.length - 1] : null
 
   return (
@@ -232,7 +285,7 @@ export default function VoiceChat() {
           </>
         )}
       </div>
-      {/* 트랜스크립션 자막 UI (Daily 자막만, 필요시) */}
+      {/* 트랜스크립션 자막 UI (whisper > daily 우선) */}
       {joined && transcriptToShow && (
         <div
           style={{
@@ -256,8 +309,9 @@ export default function VoiceChat() {
             transition: 'opacity 0.2s',
           }}
         >
-          <span style={{ color: '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
+          <span style={{ color: transcriptToShow.source === 'whisper' ? '#38bdf8' : '#fbbf24', marginRight: 8 }}>{transcriptToShow.user}:</span>
           <span>{transcriptToShow.text}</span>
+          {transcriptToShow.source === 'whisper' && <span style={{ fontSize: 12, color: '#38bdf8', marginLeft: 8 }}>(AI)</span>}
         </div>
       )}
     </>
