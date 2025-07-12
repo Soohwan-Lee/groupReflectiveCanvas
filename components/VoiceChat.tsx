@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 
-const ROOM_URL = 'https://groupreflectivecanvas.daily.co/grc-default'
+const ROOM_URL = 'https://soohwan.daily.co/xL84zG8xEXXiCrrARCR6'
 
 export default function VoiceChat() {
   const [micOn, setMicOn] = useState(true)
