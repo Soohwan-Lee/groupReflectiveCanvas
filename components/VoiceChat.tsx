@@ -5,9 +5,7 @@
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
 import React, { useRef, useState } from 'react'
-// 기존 VAD/Whisper 관련 import 제거
-// import DailyIframe, { DailyCall } from '@daily-co/daily-js'
-// import { MicVAD } from '@ricky0123/vad'
+import * as VAD from '@ricky0123/vad'
 
 interface VoiceChatProps {
   userName: string;
@@ -19,85 +17,87 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [micOn, setMicOn] = useState(true)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [transcripts, setTranscripts] = useState<any[]>([])
-  const wsRef = useRef<WebSocket | null>(null)
-  const mediaStreamRef = useRef<MediaStream | null>(null)
+  const vadRef = useRef<any>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
-  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
-  const processorRef = useRef<ScriptProcessorNode | null>(null)
 
-  // WebSocket으로 오디오 스트림 전송
-  const startRealtimeTranscription = async () => {
+  // 음성 구간이 감지될 때마다 Whisper로 전송
+  const sendAudioBufferToWhisper = async (buffer: Float32Array) => {
+    function encodeWAV(buffer: Float32Array, sampleRate: number) {
+      const length = buffer.length;
+      const wavBuffer = new ArrayBuffer(44 + length * 2);
+      const view = new DataView(wavBuffer);
+      view.setUint32(0, 0x52494646, false);
+      view.setUint32(4, 36 + length * 2, true);
+      view.setUint32(8, 0x57415645, false);
+      view.setUint32(12, 0x666d7420, false);
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      view.setUint32(36, 0x64617461, false);
+      view.setUint32(40, length * 2, true);
+      let offset = 44;
+      for (let i = 0; i < buffer.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, buffer[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+      return new Blob([wavBuffer], { type: 'audio/wav' });
+    }
+    const sampleRate = audioContextRef.current?.sampleRate || 16000;
+    const audioBlob = encodeWAV(buffer, sampleRate);
+    if (audioBlob.size < 1000) return;
+    const form = new FormData();
+    form.append('file', audioBlob, 'audio.wav');
+    form.append('userName', userName);
+    form.append('timestamp', new Date().toISOString());
+    try {
+      const res = await fetch('/api/transcribe', {
+        method: 'POST',
+        body: form,
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (res.ok && contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data.text) {
+          setTranscripts((prev) => [...prev, { ...data, userName }])
+        }
+      } else {
+        const errText = await res.text();
+        setErrorMsg('Transcribe error: ' + errText)
+      }
+    } catch (err) {
+      setErrorMsg('Transcribe error')
+    }
+  }
+
+  const startVAD = async () => {
     setJoining(true)
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      mediaStreamRef.current = stream
-      const ws = new WebSocket('wss://api.openai.com/v1/audio/realtime?api_key=YOUR_OPENAI_KEY')
-      wsRef.current = ws
-      ws.onopen = () => {
-        setJoined(true)
-        setJoining(false)
-        const audioContext = new AudioContext({ sampleRate: 16000 })
-        audioContextRef.current = audioContext
-        const source = audioContext.createMediaStreamSource(stream)
-        sourceNodeRef.current = source
-        const processor = audioContext.createScriptProcessor(4096, 1, 1)
-        processorRef.current = processor
-        source.connect(processor)
-        processor.connect(audioContext.destination)
-        processor.onaudioprocess = (e) => {
-          if (!micOn) return
-          const input = e.inputBuffer.getChannelData(0)
-          const pcm = new Int16Array(input.length)
-          for (let i = 0; i < input.length; i++) {
-            let s = Math.max(-1, Math.min(1, input[i]))
-            pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF
+      const audioContext = new AudioContext({ sampleRate: 16000 })
+      audioContextRef.current = audioContext
+      vadRef.current = await VAD.MicVAD.new({
+        onSpeechStart: () => {},
+        onSpeechEnd: async (audio: Float32Array) => {
+          if (audio.length > 0 && micOn) {
+            await sendAudioBufferToWhisper(audio)
           }
-          ws.send(pcm.buffer)
-        }
-        ws.send(JSON.stringify({
-          type: 'session.update',
-          session: {
-            turn_detection: {
-              type: 'server_vad', // 또는 'semantic_vad'
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500
-            }
-          }
-        }))
-      }
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'input_audio_buffer.speech_started') {
-          // 음성 시작 이벤트 처리 (원하면 UI 표시)
-        }
-        if (data.type === 'input_audio_buffer.speech_stopped') {
-          // 음성 종료 이벤트 처리 (원하면 UI 표시)
-        }
-        if (data.type === 'transcript') {
-          setTranscripts((prev) => [...prev, { ...data, userName }])
-        }
-      }
-      ws.onerror = (e) => {
-        setErrorMsg('WebSocket error')
-        setJoining(false)
-      }
-      ws.onclose = () => {
-        setJoined(false)
-        setJoining(false)
-      }
+        },
+      })
+      setJoined(true)
+      setJoining(false)
     } catch (err) {
       setErrorMsg('Failed to start voice chat')
       setJoining(false)
     }
   }
 
-  const stopRealtimeTranscription = () => {
-    if (wsRef.current) wsRef.current.close()
-    if (processorRef.current) processorRef.current.disconnect()
-    if (sourceNodeRef.current) sourceNodeRef.current.disconnect()
+  const stopVAD = () => {
+    if (vadRef.current) vadRef.current.pause()
     if (audioContextRef.current) audioContextRef.current.close()
-    if (mediaStreamRef.current) mediaStreamRef.current.getTracks().forEach((t) => t.stop())
     setJoined(false)
     setJoining(false)
   }
@@ -110,7 +110,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
       {!joined ? (
         <button
-          onClick={startRealtimeTranscription}
+          onClick={startVAD}
           style={{
             minWidth: 100,
             height: 40,
@@ -133,7 +133,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       ) : (
         <>
           <button
-            onClick={stopRealtimeTranscription}
+            onClick={stopVAD}
             style={{
               minWidth: 40,
               height: 40,
