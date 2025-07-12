@@ -25,7 +25,7 @@ export default async function handler(req: any, res: any) {
 
   try {
     const fields: any = await new Promise((resolve, reject) => {
-      const busboy = new Busboy({ headers: req.headers });
+      const busboy = Busboy({ headers: req.headers });
       const result: any = {};
       busboy.on('field', (fieldname, val) => {
         result[fieldname] = val;
