@@ -2,12 +2,14 @@ import React from 'react'
 import { TldrawProvider } from './providers/TldrawProvider'
 import Canvas from './components/canvas/Canvas'
 import VoiceChat from './components/VoiceChat'
+import VoiceTranscriber from './components/ui/VoiceTranscriber'
 
 const App: React.FC = () => {
   return (
     <TldrawProvider>
       <div style={{ width: '100vw', height: '100vh', display: 'flex', background: '#f8fafc', position: 'relative' }}>
         <VoiceChat />
+        <VoiceTranscriber />
         {/* AI/Voice/Sidebar components can be added here */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <Canvas />
