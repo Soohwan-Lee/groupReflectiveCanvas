@@ -18,13 +18,14 @@ export default async function handler(req: any, res: any) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         properties: {
           room_name: roomName,
-          user_name: userName,
         },
+        user_name: userName,
         is_owner: true,
         permissions: {
           transcription: 'write',
