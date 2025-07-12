@@ -95,11 +95,12 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     const handleTransMsg = async (msg: any) => {
       if (!msg?.text) return
 
-      const participantInfo = msg.participant || {}
-      const participantId: string | undefined = participantInfo.session_id || msg.speaker
-      if (!participantId) return // unable to attribute, skip DB save
+      console.log('transcription-message raw', msg)
 
-      const userNameFromDaily: string = participantInfo.user_name || 'Unknown'
+      const participantInfo = msg.participant || {}
+      const participantId: string = participantInfo.session_id || msg.speaker || 'unknown-participant'
+      const userNameFromDaily: string = participantInfo.user_name || participantInfo.user_name || 'Unknown'
+
       const sessionIdStr = DAILY_URL
       const payload = {
         session_id: sessionIdStr,
@@ -108,16 +109,24 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         start_time: new Date().toISOString(),
         text: msg.text,
       }
+
+      console.log('transcription payload', payload)
+
       // Optimistic UI 업데이트
       setTranscripts((prev) => [...prev.slice(-19), { user: userNameFromDaily, text: msg.text }])
+
       try {
-        await fetch('/api/save-transcript', {
+        const res = await fetch('/api/save-transcript', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         })
+        if (!res.ok) {
+          const errJson = await res.json().catch(() => ({}))
+          console.warn('save-transcript failed', res.status, errJson)
+        }
       } catch (e) {
-        console.error('save-transcript error', e)
+        console.error('save-transcript network error', e)
       }
     }
 
@@ -155,6 +164,15 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
           console.log('Live transcription started')
         } catch (e) {
           console.warn('startTranscription error', e)
+        }
+
+        if (callRef.current) {
+          callRef.current.on('transcription-started', () => {
+            console.log('Daily transcription started event')
+          })
+          callRef.current.on('transcription-error', (ev: any) => {
+            console.error('Daily transcription error', ev)
+          })
         }
       });
       callRef.current.on('left-meeting', () => {

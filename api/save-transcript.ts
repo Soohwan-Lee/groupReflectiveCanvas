@@ -30,18 +30,20 @@ export default async function handler(req: any, res: any) {
       text,
     } = req.body as Record<string, any>
 
-    if (!session_id || !participant_id || !start_time || !text) {
-      return res.status(400).json({ error: 'Missing required fields' })
-    }
+    // Derive sensible defaults if some fields are missing so that we can still log the text.
+    const safeSessionId = session_id || 'unknown-session'
+    const safeParticipant = participant_id || 'unknown-participant'
+    const safeStart = start_time ? new Date(start_time) : new Date()
+    const safeEnd = end_time ? new Date(end_time) : safeStart
 
     const { error } = await supabase.from('transcripts').insert([
       {
-        session_id,
-        participant_id,
+        session_id: safeSessionId,
+        participant_id: safeParticipant,
         user_name: user_name || null,
-        start_time: new Date(start_time),
-        end_time: end_time ? new Date(end_time) : new Date(start_time),
-        text,
+        start_time: safeStart,
+        end_time: safeEnd,
+        text: text || '',
       },
     ])
 
