@@ -18,13 +18,19 @@ export const config = {
 };
 
 export default async function handler(req: any, res: any) {
+  console.log('[Transcribe API] Request received - Method:', req.method, 'Content-Type:', req.headers['content-type']);
+  
   /* ───────────────────────────── 요청 검증 ───────────────────────────── */
-  if (req.method !== 'POST')
+  if (req.method !== 'POST') {
+    console.log('[Transcribe API] Method not allowed:', req.method);
     return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   const ct = req.headers['content-type'] ?? '';
-  if (!ct.startsWith('multipart/form-data'))
+  if (!ct.startsWith('multipart/form-data')) {
+    console.log('[Transcribe API] Invalid content type:', ct);
     return res.status(400).json({ error: 'Content-Type must be multipart/form-data' });
+  }
 
   /* ───────────────────── multipart/form-data 파싱 ───────────────────── */
   let userId = '';
@@ -51,13 +57,20 @@ export default async function handler(req: any, res: any) {
   req.pipe(bb);
   await parsingDone;
 
-  if (!audioBuffer || !userId || !timestamp)
+  console.log('[Transcribe API] Parsed data - userId:', userId, 'timestamp:', timestamp, 'audioBuffer size:', audioBuffer?.length);
+
+  if (!audioBuffer || !userId || !timestamp) {
+    console.log('[Transcribe API] Missing required data - audioBuffer:', !!audioBuffer, 'userId:', userId, 'timestamp:', timestamp);
     return res.status(400).json({ error: 'Missing audio, userId, or timestamp' });
+  }
 
   /* ───────────────────── Whisper-1 호출 준비 ───────────────────────── */
   const openaiApiKey = process.env.OPENAI_API_KEY;
-  if (!openaiApiKey)
+  if (!openaiApiKey) {
+    console.error('[Transcribe API] OPENAI_API_KEY not found in environment variables');
     return res.status(500).json({ error: 'Missing OPENAI_API_KEY' });
+  }
+  console.log('[Transcribe API] OpenAI API key found, preparing Whisper request...');
 
   // ✅ MIME type 지정이 핵심! (안 주면 unsupported_format 오류)
   const webmBlob = new Blob([audioBuffer], { type: 'audio/webm' });
@@ -68,6 +81,7 @@ export default async function handler(req: any, res: any) {
   form.append('response_format', 'json');  // 기본값이지만 명시
 
   /* ───────────────────── Whisper-1 호출 ────────────────────────────── */
+  console.log('[Transcribe API] Sending request to OpenAI Whisper API...');
   const whisperRes = await fetch(
     'https://api.openai.com/v1/audio/transcriptions',
     {
@@ -77,18 +91,23 @@ export default async function handler(req: any, res: any) {
     },
   );
 
+  console.log('[Transcribe API] Whisper API response status:', whisperRes.status);
+
   if (!whisperRes.ok) {
     const errBody = await whisperRes.text();
-    console.error('Whisper error', whisperRes.status, errBody);
+    console.error('[Transcribe API] Whisper API error - Status:', whisperRes.status, 'Body:', errBody);
     return res.status(500).json({ error: 'OpenAI API error', detail: errBody });
   }
 
-  const { text = '' } = await whisperRes.json();
+  const whisperResponse = await whisperRes.json();
+  console.log('[Transcribe API] Whisper API response:', whisperResponse);
+  const { text = '' } = whisperResponse;
 
   /* ───────────────────── 결과 반환 & 로그 ──────────────────────────── */
   const entry = { timestamp, userId, text };
   logs.push(entry);
-  console.log(entry);                      // 서버 로그에서도 확인 가능
+  console.log('[Transcribe API] Transcription successful:', entry);
+  console.log('[Transcribe API] Total transcriptions in memory:', logs.length);
 
   return res.status(200).json(entry);
 }
