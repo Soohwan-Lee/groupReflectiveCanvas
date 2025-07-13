@@ -103,58 +103,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     }
   }, [callRef.current])
 
-  // transcription-message handler 등록
-  useEffect(() => {
-    if (!callRef.current) return
-
-    const handleTransMsg = async (msg: any) => {
-      if (!msg?.text) return
-
-      // 콘솔에서 쉽게 찾을 수 있도록 prefix 추가
-      console.log('[Daily STT]', {
-        text: msg.text,
-        speaker: msg.speaker || msg.participant?.session_id,
-        raw: msg,
-      })
-
-      const participantInfo = msg.participant || {}
-      const participantId: string = participantInfo.session_id || msg.speaker || 'unknown-participant'
-      const userNameFromDaily: string = participantInfo.user_name || participantInfo.user_name || 'Unknown'
-
-      const sessionIdStr = DAILY_URL
-      const payload = {
-        session_id: sessionIdStr,
-        participant_id: participantId,
-        user_name: userNameFromDaily,
-        start_time: new Date().toISOString(),
-        text: msg.text,
-      }
-
-      console.log('transcription payload', payload)
-
-      // Optimistic UI 업데이트
-      setTranscripts((prev) => [...prev.slice(-19), { user: userNameFromDaily, text: msg.text }])
-
-      try {
-        const res = await fetch('/api/save-transcript', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (!res.ok) {
-          const errJson = await res.json().catch(() => ({}))
-          console.warn('save-transcript failed', res.status, errJson)
-        }
-      } catch (e) {
-        console.error('save-transcript network error', e)
-      }
-    }
-
-    callRef.current.on('transcription-message', handleTransMsg)
-    return () => {
-      callRef.current?.off('transcription-message', handleTransMsg)
-    }
-  }, [callRef.current])
+  // Daily transcription 비활성화: transcription-message 리스너 제거
 
   const ROOM_NAME = 'upOFJOWxqCOhRYldrIsR'
 
@@ -178,22 +127,9 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
         setJoined(true);
         setJoining(false);
         setErrorMsg(null);
-        try {
-          await callRef.current?.startTranscription()
-          // debug: see transcription start success
-          console.log('Live transcription started')
-        } catch (e) {
-          console.warn('startTranscription error', e)
-        }
-
-        if (callRef.current) {
-          callRef.current.on('transcription-started', () => {
-            console.log('Daily transcription started event')
-          })
-          callRef.current.on('transcription-error', (ev: any) => {
-            console.error('Daily transcription error', ev)
-          })
-        }
+        // Daily transcription 사용하지 않음
+        // UI·콘솔 노이즈 최소화를 위해 startTranscription 호출을 제거한다.
+        // Whisper(VAD) 경로에서만 전사 결과를 처리한다.
       });
       callRef.current.on('left-meeting', () => {
         setJoined(false);
