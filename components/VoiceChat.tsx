@@ -6,12 +6,54 @@
 
 import React, { useRef, useState, useEffect } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
+import { getAllStickies } from '../utils/stickyUtils'
 
 interface VoiceChatProps {
   userName: string;
+  getEditor: () => any;
 }
 
-export default function VoiceChat({ userName }: VoiceChatProps) {
+export default function VoiceChat({ userName, getEditor }: VoiceChatProps) {
+  // Dashboard state
+  const [concepts, setConcepts] = useState<string[]>([])
+  const [summary, setSummary] = useState<string>('')
+  const [loadingSummary, setLoadingSummary] = useState(false)
+
+  // Poll stickies and update summary every 5s
+  useEffect(() => {
+    let mounted = true
+    async function fetchSummary() {
+      const editor = getEditor?.()
+      if (!editor) return
+      const stickies = getAllStickies(editor).map(s => s.text).filter(Boolean)
+      if (stickies.length === 0) {
+        setConcepts([])
+        setSummary('')
+        return
+      }
+      setLoadingSummary(true)
+      try {
+        const res = await fetch('/api/gpt-summarize', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ stickies }),
+        })
+        const data = await res.json()
+        if (mounted) {
+          setConcepts(Array.isArray(data.concepts) ? data.concepts : [])
+          setSummary(data.summary || '')
+        }
+      } catch (e) {
+        if (mounted) setSummary('AI summary error')
+      } finally {
+        if (mounted) setLoadingSummary(false)
+      }
+    }
+    fetchSummary()
+    const interval = setInterval(fetchSummary, 5000)
+    return () => { mounted = false; clearInterval(interval) }
+  }, [getEditor])
+
   const [joined, setJoined] = useState(false)
   const [joining, setJoining] = useState(false)
   const [micOn, setMicOn] = useState(true)
@@ -192,7 +234,53 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   }, [callRef.current]);
 
   return (
-    <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', gap: 8 }}>
+    <div style={{ position: 'fixed', left: 20, bottom: 60, zIndex: 30, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
+      {/* Dashboard: Idea Landscape */}
+      <div style={{
+        minWidth: 220,
+        minHeight: 80,
+        background: '#fff',
+        borderRadius: 16,
+        boxShadow: '0 2px 12px #0002',
+        padding: '16px 20px 12px 20px',
+        marginBottom: 8,
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+      }}>
+        <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 2 }}>Idea Landscape</div>
+        {loadingSummary ? (
+          <div style={{ color: '#888', fontSize: 13 }}>Analyzing...</div>
+        ) : concepts.length === 0 ? (
+          <div style={{ color: '#aaa', fontSize: 13 }}>No sticky notes yet</div>
+        ) : (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: 4 }}>
+            {concepts.map((c, i) => (
+              <div key={i} style={{
+                borderRadius: '50%',
+                background: '#f1f5f9',
+                border: '2px solid #2563eb',
+                minWidth: 48,
+                minHeight: 48,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 600,
+                fontSize: 14,
+                padding: '0 10px',
+                textAlign: 'center',
+                boxShadow: '0 1px 4px #0001',
+              }}>{c}</div>
+            ))}
+          </div>
+        )}
+        {summary && (
+          <div style={{ fontSize: 13, color: '#333', textAlign: 'center', marginTop: 2 }}>{summary}</div>
+        )}
+      </div>
       {!joined ? (
         <button
           onClick={joinCall}
