@@ -36,7 +36,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   }, []);
 
   // remote audio attach / detach helpers
-  const attachRemoteAudio = (participantId: string, track: MediaStreamTrack) => {
+  const attachAudio = (participantId: string, track: MediaStreamTrack) => {
     const stream = new MediaStream([track])
     const audioEl = new Audio()
     audioEl.srcObject = stream
@@ -55,7 +55,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     })
   }
 
-  const detachRemoteAudio = (participantId: string) => {
+  const detachAudio = (participantId: string) => {
     const audioEl = remoteAudios.current[participantId]
     if (audioEl) {
       audioEl.pause()
@@ -79,17 +79,17 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     if (!callRef.current) return
 
     const handleTrackStarted = (ev: any) => {
-      if (ev.track.kind === 'audio' && ev.participant.session_id !== callRef.current?.participants().local?.session_id) {
-        attachRemoteAudio(ev.participant.session_id, ev.track)
+      if (ev.track.kind === 'audio') {
+        attachAudio(ev.participant.session_id, ev.track)
       }
     }
     const handleTrackStopped = (ev: any) => {
       if (ev.track.kind === 'audio') {
-        detachRemoteAudio(ev.participant.session_id)
+        detachAudio(ev.participant.session_id)
       }
     }
     const handleParticipantLeft = (ev: any) => {
-      detachRemoteAudio(ev.participant.session_id)
+      detachAudio(ev.participant.session_id)
     }
 
     callRef.current.on('track-started', handleTrackStarted)
