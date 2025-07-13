@@ -5,9 +5,14 @@ export class ParticipantTranscriber {
   private mediaRecorder: MediaRecorder | null = null
   private chunks: Blob[] = []
   private participantId: string
+  private sessionId: string
+  private userName?: string
 
-  constructor(participantId: string, stream: MediaStream) {
+  constructor(args: { sessionId: string; participantId: string; stream: MediaStream; userName?: string }) {
+    const { sessionId, participantId, stream, userName } = args
     this.participantId = participantId
+    this.sessionId = sessionId
+    this.userName = userName
 
     this.vad = new VADClient({
       stream,
@@ -56,7 +61,7 @@ export class ParticipantTranscriber {
     })
 
     const blob = new Blob(this.chunks, { type: 'audio/webm' })
-    console.log(`[VAD] utterance captured (${(blob.size / 1024).toFixed(1)} KB) for`, this.participantId)
+    console.log(`[VAD] utterance captured ${(blob.size / 1024).toFixed(1)} KB`, this.participantId)
 
     try {
       const res = await fetch('/api/whisper-transcribe', {
@@ -67,11 +72,24 @@ export class ParticipantTranscriber {
       const json = await res.json()
       if (res.ok && json.text) {
         console.log(`[Whisper][${this.participantId}]`, json.text)
+
+        // send to Supabase
+        await fetch('/api/save-transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            session_id: this.sessionId,
+            participant_id: this.participantId,
+            user_name: this.userName || null,
+            start_time: new Date().toISOString(),
+            text: json.text,
+          }),
+        })
       } else {
         console.warn('whisper error', json)
       }
     } catch (e) {
-      console.error('fetch whisper error', e)
+      console.error('whisper/supabase error', e)
     }
   }
 } 

@@ -49,7 +49,14 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
 
     // Start per-participant VAD+Whisper transcriber
     import('../utils/participantTranscriber').then(({ ParticipantTranscriber }) => {
-      const t = new ParticipantTranscriber(participantId, stream)
+      const isLocal = participantId === callRef.current?.participants().local?.session_id
+      const displayName = isLocal ? userName : ''
+      const t = new ParticipantTranscriber({
+        sessionId: DAILY_URL,
+        participantId,
+        stream,
+        userName: displayName,
+      })
       transcribers.current[participantId] = t
       t.start()
     })
