@@ -7,7 +7,9 @@ export default defineConfig({
     react(),
   ],
   build: {
+    // Disable treeshake to avoid Rollup "object is not extensible" crash
     rollupOptions: {
+      treeshake: false,
       plugins: [
         // keep 'use client' etc. so Rollup doesn't error
         preserveDirectives(),
