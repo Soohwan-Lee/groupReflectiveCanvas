@@ -95,7 +95,12 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     const handleTransMsg = async (msg: any) => {
       if (!msg?.text) return
 
-      console.log('transcription-message raw', msg)
+      // 콘솔에서 쉽게 찾을 수 있도록 prefix 추가
+      console.log('[Daily STT]', {
+        text: msg.text,
+        speaker: msg.speaker || msg.participant?.session_id,
+        raw: msg,
+      })
 
       const participantInfo = msg.participant || {}
       const participantId: string = participantInfo.session_id || msg.speaker || 'unknown-participant'
@@ -307,6 +312,32 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
           <b>{t.user}:</b> {t.text}
         </div>
       ))}
+
+      {/* 라이브 자막 표시 */}
+      {transcripts.length > 0 && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 8,
+            right: 8,
+            maxHeight: 120,
+            overflowY: 'auto',
+            background: 'rgba(0,0,0,0.6)',
+            color: '#fff',
+            fontSize: 14,
+            padding: '4px 8px',
+            borderRadius: 4,
+          }}
+        >
+          {transcripts.slice(-5).map((t, idx) => (
+            <div key={idx} style={{ marginBottom: 2 }}>
+              <strong>{t.user}: </strong>
+              {t.text}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 } 
