@@ -13,7 +13,7 @@ export function getAllStickies(editor: any): StickyRecord[] {
   const records: StickyRecord[] = []
   const all = editor.store.allRecords?.() ?? []
   all.forEach((rec: any) => {
-    if (rec.typeName === 'shape' && rec.type === 'sticky') {
+    if (rec.type === 'note') {
       records.push({
         id: rec.id,
         text: rec.props?.text ?? '',

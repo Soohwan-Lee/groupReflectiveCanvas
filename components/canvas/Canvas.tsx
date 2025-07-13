@@ -43,7 +43,7 @@ const Canvas = forwardRef<any, CanvasProps>(
         (update: any) => {
           const addedRecords = Object.values(update.changes.added ?? {})
           addedRecords.forEach((rec: any) => {
-            if (rec.typeName === 'shape' && rec.type === 'sticky') {
+            if (rec.type === 'note') {
               // Already tagged? skip.
               if (rec.meta?.createdBy) return
 
