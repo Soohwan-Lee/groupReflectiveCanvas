@@ -19,6 +19,7 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
   const [currentSpeakerId, setCurrentSpeakerId] = useState<string | null>(null)
   const callRef = useRef<DailyCall | null>(null)
   const remoteAudios = useRef<Record<string, HTMLAudioElement>>({})
+  const transcribers = useRef<Record<string, any>>({})
   const [transcripts, setTranscripts] = useState<{ user: string; text: string }[]>([])
 
   // Daily 룸 URL (퍼블릭 룸, 토큰 불필요)
@@ -45,6 +46,13 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
     // 꼬여서 무음이 되는 것을 방지하기 위해 volume 1 유지
     audioEl.volume = 1
     remoteAudios.current[participantId] = audioEl
+
+    // Start per-participant VAD+Whisper transcriber
+    import('../utils/participantTranscriber').then(({ ParticipantTranscriber }) => {
+      const t = new ParticipantTranscriber(participantId, stream)
+      transcribers.current[participantId] = t
+      t.start()
+    })
   }
 
   const detachRemoteAudio = (participantId: string) => {
@@ -56,6 +64,13 @@ export default function VoiceChat({ userName }: VoiceChatProps) {
       stream?.getTracks().forEach((t) => t.stop())
       audioEl.srcObject = null
       delete remoteAudios.current[participantId]
+
+      // Clean up transcriber
+      const t = transcribers.current[participantId]
+      if (t) {
+        t.dispose()
+        delete transcribers.current[participantId]
+      }
     }
   }
 
