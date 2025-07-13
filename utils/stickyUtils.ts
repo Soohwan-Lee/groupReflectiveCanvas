@@ -14,9 +14,27 @@ export function getAllStickies(editor: any): StickyRecord[] {
   const all = editor.store.allRecords?.() ?? []
   all.forEach((rec: any) => {
     if (rec.type === 'note') {
+      let plain = ''
+      // tldraw note stores text in richText (TipTap JSON). Extract plain text if possible.
+      const rt = rec.props?.richText
+      if (typeof rt === 'string') {
+        plain = rt
+      } else if (rt && Array.isArray(rt.content)) {
+        // naive deep walk to concatenate text nodes
+        const walk = (node: any): string => {
+          if (!node) return ''
+          if (node.type === 'text') return node.text ?? ''
+          if (Array.isArray(node.content)) return node.content.map(walk).join('')
+          return ''
+        }
+        plain = walk(rt)
+      }
+      if (!plain) {
+        plain = rec.props?.text ?? ''
+      }
       records.push({
         id: rec.id,
-        text: rec.props?.text ?? '',
+        text: plain,
         createdBy: rec.meta?.createdBy ?? 'unknown',
         userName: rec.meta?.userName ?? '',
         createdAt: rec.meta?.createdAt ?? 0,

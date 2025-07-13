@@ -304,7 +304,7 @@ export default function VoiceChat({ userName, getEditor }: VoiceChatProps) {
           {joining ? 'Joining...' : 'Join Voice'}
         </button>
       ) : (
-        <>
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <button
             onClick={leaveCall}
             style={{
@@ -350,7 +350,7 @@ export default function VoiceChat({ userName, getEditor }: VoiceChatProps) {
               <svg width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             )}
           </button>
-        </>
+        </div>
       )}
       {errorMsg && <div style={{ color: 'red' }}>{errorMsg}</div>}
       {transcripts.slice(-3).map((t, i) => (
