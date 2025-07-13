@@ -4,7 +4,7 @@
 // auto_start_transcription(C 방식) 적용: join만 하면 자동으로 트랜스크립션이 시작됨
 // 별도의 startTranscription() 호출, 권한/토큰 관리 불필요
 
-import React, { useRef, useState } from 'react'
+import React, { useRef, useState, useEffect } from 'react'
 import DailyIframe, { DailyCall } from '@daily-co/daily-js'
 import { getAllStickies } from '../utils/stickyUtils'
 
